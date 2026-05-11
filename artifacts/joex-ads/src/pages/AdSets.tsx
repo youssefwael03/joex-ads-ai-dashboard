@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAccountStore } from "@/store/accountStore";
 import { useDateStore } from "@/store/dateStore";
 import { useAdSets } from "@/hooks/useMeta";
+import { useFormatCurrency, useAccountCurrency } from "@/hooks/useCurrency";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,36 +12,15 @@ import { Download, Search, LayoutDashboard } from "lucide-react";
 import { motion } from "framer-motion";
 import { safeNum, getPurchaseRoas } from "@/lib/metaApi";
 
-function exportCsv(rows: any[]) {
-  const headers = ["Name", "Status", "Spend", "ROAS", "CTR", "CPC", "Frequency"];
-  const lines = rows.map((adset: any) => {
-    const d = adset.insights?.data?.[0] ?? {};
-    return [
-      `"${adset.name}"`,
-      adset.status,
-      safeNum(d.spend).toFixed(2),
-      getPurchaseRoas(d.purchase_roas).toFixed(2),
-      safeNum(d.ctr).toFixed(2),
-      safeNum(d.cpc).toFixed(2),
-      safeNum(d.frequency).toFixed(2),
-    ].join(",");
-  });
-  const csv = [headers.join(","), ...lines].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "adsets.csv";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
-
 export default function AdSets() {
   const { selectedAccountId } = useAccountStore();
   const { since, until } = useDateStore();
   const { data, isLoading } = useAdSets(selectedAccountId, since, until);
+  const fmt = useFormatCurrency();
+  const currency = useAccountCurrency();
   const [search, setSearch] = useState("");
+  const [sortCol, setSortCol] = useState<"spend" | "roas" | "ctr" | "cpc" | "frequency">("spend");
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   if (!selectedAccountId) {
     return (
@@ -56,15 +36,67 @@ export default function AdSets() {
     );
   }
 
-  const adsets = data?.data ?? [];
-  const filtered = adsets.filter((c: any) => c.name?.toLowerCase().includes(search.toLowerCase()));
+  const rawAdsets: any[] = data?.data ?? [];
+  const enriched = rawAdsets.map((a: any) => {
+    const d = a.insights?.data?.[0] ?? {};
+    return {
+      ...a,
+      _spend: safeNum(d.spend),
+      _roas: getPurchaseRoas(d.purchase_roas),
+      _ctr: safeNum(d.ctr),
+      _cpc: safeNum(d.cpc),
+      _frequency: safeNum(d.frequency),
+    };
+  });
+
+  const filtered = enriched.filter((a: any) =>
+    a.name?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const sorted = [...filtered].sort((a, b) => {
+    const map: Record<string, string> = { spend: "_spend", roas: "_roas", ctr: "_ctr", cpc: "_cpc", frequency: "_frequency" };
+    const diff = (b[map[sortCol]] ?? 0) - (a[map[sortCol]] ?? 0);
+    return sortDir === "desc" ? diff : -diff;
+  });
+
+  const toggleSort = (col: typeof sortCol) => {
+    if (sortCol === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortCol(col); setSortDir("desc"); }
+  };
+
+  const SortHead = ({ col, label, align = "right" }: { col: typeof sortCol; label: string; align?: string }) => (
+    <TableHead
+      className={`text-${align} cursor-pointer select-none hover:text-foreground transition-colors`}
+      onClick={() => toggleSort(col)}
+    >
+      {label} {sortCol === col ? (sortDir === "desc" ? "↓" : "↑") : ""}
+    </TableHead>
+  );
+
+  const exportCsv = () => {
+    const headers = ["Name", "Status", "Spend", "ROAS", "CTR", "CPC", "Frequency"];
+    const rows = sorted.map((a: any) => [
+      `"${a.name}"`, a.status,
+      a._spend.toFixed(2), a._roas.toFixed(2),
+      `${a._ctr.toFixed(2)}%`, a._cpc.toFixed(2), a._frequency.toFixed(2),
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `adsets-${currency}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-end">
+    <div className="space-y-6 pb-10">
+      <div className="flex justify-between items-end flex-wrap gap-3">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-foreground">Ad Sets</h2>
-          <p className="text-muted-foreground mt-1 text-sm">Detailed ad set performance metrics.</p>
+          <p className="text-muted-foreground mt-1 text-sm">Detailed ad set performance — {currency}.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -73,16 +105,10 @@ export default function AdSets() {
               placeholder="Search ad sets..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 w-[250px] bg-card border-card-border"
-              data-testid="input-search-adsets"
+              className="pl-9 w-[240px] bg-card border-card-border"
             />
           </div>
-          <Button
-            variant="outline"
-            className="border-card-border hover:bg-sidebar-accent"
-            onClick={() => exportCsv(filtered)}
-            data-testid="btn-export-adsets"
-          >
+          <Button variant="outline" onClick={exportCsv} className="border-card-border hover:bg-sidebar-accent" disabled={sorted.length === 0}>
             <Download className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
@@ -90,7 +116,7 @@ export default function AdSets() {
       </div>
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         className="rounded-md border border-card-border bg-card/50 backdrop-blur-sm overflow-hidden"
       >
@@ -99,11 +125,11 @@ export default function AdSets() {
             <TableRow className="border-card-border hover:bg-transparent">
               <TableHead>Name</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="text-right">Spend</TableHead>
-              <TableHead className="text-right">ROAS</TableHead>
-              <TableHead className="text-right">CTR</TableHead>
-              <TableHead className="text-right">CPC</TableHead>
-              <TableHead className="text-right">Frequency</TableHead>
+              <SortHead col="spend" label="Spend" />
+              <SortHead col="roas" label="ROAS" />
+              <SortHead col="ctr" label="CTR" />
+              <SortHead col="cpc" label="CPC" />
+              <SortHead col="frequency" label="Freq" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -115,47 +141,36 @@ export default function AdSets() {
                   ))}
                 </TableRow>
               ))
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                   No ad sets found for this account and date range.
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((adset: any) => {
-                const insight = adset.insights?.data?.[0] ?? {};
-                const roas = getPurchaseRoas(insight.purchase_roas);
-                return (
-                  <TableRow
-                    key={adset.id}
-                    className="border-card-border hover:bg-sidebar-accent/50 transition-colors"
-                    data-testid={`row-adset-${adset.id}`}
-                  >
-                    <TableCell className="font-medium max-w-[200px] truncate">{adset.name}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={
-                          adset.status === "ACTIVE"
-                            ? "border-green-500 text-green-500"
-                            : adset.status === "PAUSED"
-                            ? "border-yellow-500 text-yellow-500"
-                            : "border-gray-500 text-gray-500"
-                        }
-                      >
-                        {adset.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">${safeNum(insight.spend).toFixed(2)}</TableCell>
-                    <TableCell className={`text-right font-mono ${roas > 2 ? "text-primary" : ""}`}>
-                      {roas.toFixed(2)}x
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{safeNum(insight.ctr).toFixed(2)}%</TableCell>
-                    <TableCell className="text-right font-mono">${safeNum(insight.cpc).toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-mono">{safeNum(insight.frequency).toFixed(2)}</TableCell>
-                  </TableRow>
-                );
-              })
+              sorted.map((a: any) => (
+                <TableRow key={a.id} className="border-card-border hover:bg-sidebar-accent/50 transition-colors">
+                  <TableCell className="font-medium max-w-[200px] truncate">{a.name}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={
+                      a.status === "ACTIVE" ? "border-green-500 text-green-400"
+                      : a.status === "PAUSED" ? "border-yellow-500 text-yellow-400"
+                      : "border-muted text-muted-foreground"
+                    }>
+                      {a.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{fmt(a._spend)}</TableCell>
+                  <TableCell className={`text-right font-mono ${a._roas >= 2 ? "text-primary" : a._roas > 0 ? "" : "text-muted-foreground"}`}>
+                    {a._roas > 0 ? `${a._roas.toFixed(2)}x` : "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{a._ctr > 0 ? `${a._ctr.toFixed(2)}%` : "—"}</TableCell>
+                  <TableCell className="text-right font-mono">{a._cpc > 0 ? fmt(a._cpc) : "—"}</TableCell>
+                  <TableCell className={`text-right font-mono ${a._frequency > 4 ? "text-yellow-400" : a._frequency > 5 ? "text-destructive" : ""}`}>
+                    {a._frequency > 0 ? a._frequency.toFixed(2) : "—"}
+                  </TableCell>
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>

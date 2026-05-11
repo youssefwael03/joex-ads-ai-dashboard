@@ -70,3 +70,51 @@ export const useAds = (accountId: string | null, since: string, until: string) =
     enabled: !!accountId,
     staleTime: 2 * 60 * 1000,
   });
+
+export const usePages = (enabled: boolean) =>
+  useQuery({
+    queryKey: ["meta", "pages"],
+    queryFn: () => metaApi.getPages(),
+    enabled,
+    staleTime: 10 * 60 * 1000,
+  });
+
+export const useInstagram = (pageId: string | null) =>
+  useQuery({
+    queryKey: ["meta", "instagram", pageId],
+    queryFn: () => metaApi.getInstagram(pageId!),
+    enabled: !!pageId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+export const useLeadForms = (pageId: string | null) =>
+  useQuery({
+    queryKey: ["meta", "lead-forms", pageId],
+    queryFn: () => metaApi.getLeadForms(pageId!),
+    enabled: !!pageId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+export const useLeads = (formId: string | null) =>
+  useQuery({
+    queryKey: ["meta", "leads", formId],
+    queryFn: () => metaApi.getLeads(formId!),
+    enabled: !!formId,
+    staleTime: 2 * 60 * 1000,
+  });
+
+export const useCatalogs = (businessId: string | null) =>
+  useQuery({
+    queryKey: ["meta", "catalogs", businessId],
+    queryFn: () => metaApi.getCatalogs(businessId!),
+    enabled: !!businessId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+export const useCatalogProducts = (catalogId: string | null) =>
+  useQuery({
+    queryKey: ["meta", "catalog-products", catalogId],
+    queryFn: () => metaApi.getCatalogProducts(catalogId!),
+    enabled: !!catalogId,
+    staleTime: 5 * 60 * 1000,
+  });

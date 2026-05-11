@@ -1,0 +1,273 @@
+You are now entering the FINAL STABILIZATION + PRODUCTION OPTIMIZATION phase for this SaaS dashboard.
+
+The core dashboard and Meta connection are working, but multiple critical systems are still broken, incomplete, or using placeholder/demo logic.
+
+Your task is to fully fix, connect, optimize, and productionize all remaining systems so the platform becomes a real working SaaS product ready for GitHub + Vercel deployment.
+
+========================================
+CRITICAL ISSUES TO FIX
+======================
+
+1. ANALYTICS TABS NOT READING REAL DATA
+   ========================================
+
+The following tabs currently fail to properly analyze or read real ad account data:
+
+* Campaigns
+* Ad Sets
+* Ads
+* Creatives
+* Instagram
+* Catalog
+* AI Insights
+* Reports
+
+Current issue:
+The UI loads, but the analysis logic is incomplete, disconnected, mocked, or not properly connected to Meta API responses.
+
+Fix all data pipelines so every tab:
+
+* Reads REAL Meta Ads data
+* Processes live account data correctly
+* Displays accurate analytics
+* Generates real AI insights
+* Updates dynamically based on selected account/date range
+
+Implement proper:
+
+* Data fetching
+* Data normalization
+* State synchronization
+* Caching
+* Error handling
+* Empty states
+* Loading states
+
+========================================
+2. FULL AI ANALYSIS ENGINE CONNECTION
+=====================================
+
+Currently AI insights are partially fake, static, or disconnected from real campaign data.
+
+Fix and connect the AI engine so it can truly analyze:
+
+* Campaign performance
+* Ad set performance
+* Ad performance
+* Creative performance
+* Audience performance
+* Budget efficiency
+* Scaling opportunities
+* Ad fatigue
+* CTR drops
+* ROAS trends
+* CPA spikes
+* Weak creatives
+* Winning creatives
+
+AI analysis must use REAL fetched metrics and generate dynamic insights.
+
+The AI assistant should:
+
+* Explain WHY campaigns are winning/losing
+* Recommend scaling actions
+* Recommend budget shifts
+* Recommend creative testing ideas
+* Recommend optimization actions
+* Detect wasted spend
+* Detect performance anomalies
+
+========================================
+3. CREATIVE ANALYSIS SYSTEM
+===========================
+
+The creative tab currently cannot properly analyze creatives.
+
+Fix the entire creative intelligence system.
+
+Requirements:
+
+* Read creative metadata correctly
+* Analyze headlines
+* Analyze captions
+* Analyze CTA structure
+* Analyze visual patterns
+* Detect winning hooks
+* Detect weak hooks
+* Generate creative scores
+* Generate actionable suggestions
+* Detect creative fatigue
+
+Add:
+
+* Creative score cards
+* Win/loss reasoning
+* AI-generated improvement ideas
+* Creative testing recommendations
+
+========================================
+4. PDF REPORT SYSTEM IS BROKEN
+==============================
+
+Current error:
+"The react-pdf/renderer integration requires server-side dependencies or complex client-side setups that are currently stubbed in this demo mode."
+
+This means the reporting system is incomplete/demo-only.
+
+Completely rebuild the reporting/export system.
+
+Requirements:
+
+* Generate REAL PDF reports
+* Use production-ready PDF generation
+* Reports must work on Vercel
+* Reports must work in production mode
+* Reports must include:
+
+  * KPIs
+  * Spend
+  * ROAS
+  * CTR
+  * CPC
+  * CPA
+  * Charts
+  * Creative insights
+  * AI recommendations
+  * Trend analysis
+
+Implement a REAL export architecture using:
+
+* @react-pdf/renderer properly configured
+  OR
+* Puppeteer server-side rendering
+  OR
+* A Vercel-compatible PDF solution
+
+NO MORE demo/stub logic.
+
+The export system must:
+
+* Work reliably
+* Handle large reports
+* Download correctly
+* Be production-safe
+
+========================================
+5. EGYPTIAN MARKET ALERT RULES
+==============================
+
+The alert/automation rules are currently generic and not adapted to the Egyptian advertising market.
+
+Refactor the entire alert engine to support Egyptian-market benchmarks.
+
+Optimize rules for:
+
+* Egyptian CPM behavior
+* Egyptian CPA expectations
+* Egyptian CTR averages
+* E-commerce performance in Egypt
+* Arabic creative performance behavior
+* COD business models
+* Local conversion behavior
+* Mobile-first traffic patterns
+* Ramadan/seasonality considerations
+
+Alerts should become smarter and context-aware.
+
+Examples:
+
+* Detect expensive CPM relative to Egypt benchmarks
+* Detect low CTR for Arabic creatives
+* Detect poor COD economics
+* Detect overspending campaigns
+* Detect weak scaling structure
+
+========================================
+6. CURRENCY HANDLING BUG
+========================
+
+Current issue:
+The dashboard correctly reads the ad account currency from Meta Ads API, BUT analysis systems and AI insights still display values in USD.
+
+Fix this globally.
+
+Requirements:
+
+* The ENTIRE platform must dynamically use the selected ad account currency.
+* ALL tabs must use the same currency consistently.
+* AI insights must reference the correct currency.
+* Reports/PDF exports must use the correct currency.
+* Charts/tables/cards must update automatically.
+
+Examples:
+If the ad account currency is:
+
+* EGP → entire dashboard uses EGP
+* AED → entire dashboard uses AED
+* SAR → entire dashboard uses SAR
+
+Implement:
+
+* Global currency context/store
+* Currency formatting utilities
+* Dynamic currency synchronization
+
+========================================
+7. GITHUB + VERCEL PRODUCTION READINESS
+=======================================
+
+The project must now be fully cleaned and production-ready.
+
+Requirements:
+
+* Remove all demo/stub/mock logic
+* Remove fake placeholder systems
+* Remove broken imports
+* Remove unused dependencies
+* Ensure clean builds
+* Ensure stable deployment
+
+Before completion:
+
+* npm run build must pass
+* npm run lint must pass
+* TypeScript must pass
+* No hydration errors
+* No runtime crashes
+* No environment variable issues
+
+Prepare project for:
+
+* GitHub repository upload
+* Vercel deployment
+* Production hosting
+* Scalability
+
+========================================
+8. FINAL DELIVERY REQUIREMENTS
+==============================
+
+When finished:
+
+* Explain every major fix
+* Explain architecture improvements
+* Explain PDF system implementation
+* Explain currency handling architecture
+* Explain AI analysis pipeline
+* Explain Egyptian-market optimization logic
+* Explain deployment process
+
+Generate:
+
+* Clean README.md
+* .env.example
+* Deployment guide
+* GitHub setup guide
+* Vercel deployment guide
+
+The final platform should feel like:
+
+* A real premium SaaS
+* A production-ready AI ad intelligence platform
+* A stable scalable analytics system
+* Not a prototype or demo
