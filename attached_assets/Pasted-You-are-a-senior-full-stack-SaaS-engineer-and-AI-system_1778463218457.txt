@@ -1,0 +1,572 @@
+You are a senior full-stack SaaS engineer and AI systems architect.
+
+Build a production-grade AI-powered advertising analytics platform called “Joex Ads Dashboard”.
+
+This is NOT a simple reporting dashboard.
+
+The platform should function as a complete Performance Marketing Operating System for media buyers, agencies, ecommerce brands, and performance marketers.
+
+The system must deeply integrate with Meta Marketing API using a user-provided long-lived access token (NO OAuth login).
+
+The user pastes their own token → selects an ad account → the entire platform updates dynamically based on that account.
+
+---
+
+## TECH STACK
+
+Use:
+
+* Next.js 14+ App Router
+* TypeScript
+* Tailwind CSS
+* shadcn/ui
+* Framer Motion
+* TanStack React Query
+* Recharts
+* Zustand
+* date-fns
+* Lucide Icons
+* @react-pdf/renderer
+* Fully responsive
+* Dark luxury UI
+* Enterprise folder structure
+
+NO DATABASE.
+
+Store token in localStorage only.
+
+---
+
+## DESIGN SYSTEM
+
+Design inspiration:
+
+* Linear
+* Stripe
+* Triple Whale
+* Vercel
+* Meta Ads Manager
+* Notion analytics
+
+UI style:
+
+* Dark mode default
+* Gold/purple accent colors
+* Glassmorphism
+* Soft shadows
+* Modern cards
+* Smooth animations
+* Sticky filters
+* Premium SaaS feeling
+* Highly visual analytics interface
+
+---
+
+## META API PERMISSIONS
+
+The dashboard must fully utilize these permissions:
+
+* manage_fundraisers
+* read_insights
+* publish_video
+* catalog_management
+* threads_business_basic
+* pages_show_list
+* ads_management
+* ads_read
+* business_management
+* pages_messaging
+* instagram_basic
+* instagram_manage_comments
+* instagram_manage_insights
+* instagram_content_publish
+* leads_retrieval
+* whatsapp_business_management
+* instagram_manage_messages
+* pages_read_engagement
+* pages_manage_metadata
+* pages_read_user_content
+* pages_manage_ads
+* pages_manage_posts
+* pages_manage_engagement
+* whatsapp_business_messaging
+* instagram_shopping_tag_products
+* instagram_branded_content_brand
+* instagram_branded_content_ads_brand
+* manage_app_solution
+* pages_utility_messaging
+* paid_marketing_messages
+* whatsapp_business_manage_events
+* instagram_manage_contents
+
+---
+
+## MAIN PLATFORM FEATURES
+
+1. AUTH + TOKEN SYSTEM
+
+Create landing page:
+
+/app/page.tsx
+
+Features:
+
+* Password-style token input
+* Token validation
+* Validate using /me and /me/adaccounts
+* Save token in localStorage:
+  joex_ads_token
+
+If invalid:
+
+* show beautiful error toast
+
+If valid:
+
+* redirect to /dashboard
+
+Dashboard must auto-check token validity on load.
+
+Add:
+
+* “Change Token”
+* “Reconnect”
+* “Token Status”
+
+---
+
+2. MULTI AD ACCOUNT SYSTEM
+
+---
+
+Fetch all ad accounts from:
+
+/me/adaccounts
+
+Features:
+
+* searchable dropdown
+* account currency
+* account status
+* account timezone
+* business name
+
+When selected:
+
+* entire dashboard updates instantly
+
+---
+
+3. EXECUTIVE DASHBOARD
+
+---
+
+Build a world-class analytics dashboard.
+
+Include:
+
+KPI Cards:
+
+* Spend
+* Revenue
+* ROAS
+* CTR
+* CPM
+* CPC
+* CPA
+* Frequency
+* Reach
+* Impressions
+* Link Clicks
+* Purchases
+* Conversion Rate
+
+Charts:
+
+* Spend over time
+* ROAS trend
+* CTR trend
+* Funnel chart
+* Audience heatmaps
+* Placement performance
+* Country performance
+* Device performance
+
+Use advanced visualizations.
+
+---
+
+4. CAMPAIGNS ANALYTICS
+
+---
+
+Create advanced campaign tables with:
+
+* sorting
+* filtering
+* search
+* sticky headers
+* pagination
+* column visibility
+* export CSV
+
+For campaigns/adsets/ads show:
+
+* status
+* spend
+* roas
+* ctr
+* cpm
+* frequency
+* conversions
+* purchases
+* cost per purchase
+* attribution
+* quality ranking
+* engagement ranking
+* conversion ranking
+
+---
+
+5. AI SEGMENTATION ENGINE
+
+---
+
+Build intelligent segmentation system.
+
+Automatically classify campaigns into:
+
+* Winners
+* Scaling Opportunities
+* Stable Performers
+* Fatigued Campaigns
+* High Risk Campaigns
+* Low CTR Campaigns
+* Expensive CPA Campaigns
+* Creative Fatigue
+* Learning Limited
+* Audience Saturation
+
+Create visual segment cards.
+
+---
+
+6. AI RECOMMENDATION ENGINE
+
+---
+
+MOST IMPORTANT FEATURE.
+
+Build a rule-based AI analysis engine.
+
+The engine must:
+
+* analyze trends
+* detect anomalies
+* identify scaling opportunities
+* detect creative fatigue
+* detect audience overlap
+* identify wasted spend
+* identify budget inefficiencies
+
+Each recommendation MUST include:
+
+* Problem
+* Evidence
+* Impact
+* Recommended Action
+* Priority Level
+* Expected Outcome
+
+Example:
+
+“Campaign X is showing severe creative fatigue.
+
+Evidence:
+
+* Frequency increased 172%
+* CTR dropped 31%
+* CPM increased 22%
+
+Recommended actions:
+
+* Launch 3 new creatives
+* Duplicate winning adset
+* Exclude 14-day engagers
+* Reduce scaling velocity”
+
+---
+
+7. CREATIVE INTELLIGENCE CENTER
+
+---
+
+Build creative analytics system.
+
+Analyze:
+
+* top creatives
+* worst creatives
+* best hooks
+* best captions
+* engagement rate
+* video performance
+* thumbnail CTR
+* organic vs paid comparison
+
+Features:
+
+* creative gallery
+* video preview
+* engagement heatmaps
+* top-performing post formats
+
+---
+
+8. INSTAGRAM + FACEBOOK INSIGHTS
+
+---
+
+Use:
+
+* instagram_basic
+* instagram_manage_insights
+* pages_read_engagement
+
+Build:
+
+* follower growth
+* engagement analytics
+* reach
+* profile visits
+* top posts
+* top reels
+* best posting times
+* engagement heatmaps
+
+---
+
+9. WHATSAPP ANALYTICS
+
+---
+
+Use:
+
+* whatsapp_business_management
+* whatsapp_business_messaging
+
+Build:
+
+* conversation analytics
+* response rate
+* average response time
+* conversations started
+* lead quality scoring
+* conversion tracking
+* WhatsApp funnel
+
+---
+
+10. LEADS CENTER
+
+---
+
+Use:
+
+* leads_retrieval
+
+Build:
+
+* leads table
+* lead source analysis
+* duplicate lead detection
+* lead quality score
+* conversion probability
+* CRM-style pipeline
+
+---
+
+11. CATALOG + SHOPPING ANALYTICS
+
+---
+
+Use:
+
+* catalog_management
+* instagram_shopping_tag_products
+
+Build:
+
+* best selling products
+* product ROAS
+* shopping funnel
+* product engagement
+* catalog insights
+
+---
+
+12. AUTOMATION + ALERTS
+
+---
+
+Create automated monitoring engine.
+
+Alerts:
+
+* ROAS drop
+* spend spikes
+* CTR drops
+* high frequency
+* creative fatigue
+* ad disapprovals
+* scaling opportunities
+
+Show alerts in:
+
+* notification center
+* dashboard cards
+
+---
+
+13. REPORTING SYSTEM
+
+---
+
+Build advanced PDF reporting system.
+
+Generate beautiful PDF reports including:
+
+* executive summary
+* KPIs
+* charts
+* recommendations
+* trends
+* campaign breakdown
+* opportunities
+* risks
+
+API route:
+
+* /api/generate-report
+
+Use:
+@react-pdf/renderer
+
+---
+
+14. DATE SYSTEM
+
+---
+
+Global date range picker.
+
+Presets:
+
+* Today
+* Yesterday
+* Last 7 days
+* Last 30 days
+* This Month
+* Last Month
+* Custom
+
+Changing date updates ALL analytics instantly.
+
+---
+
+15. PERFORMANCE + ARCHITECTURE
+
+---
+
+Build enterprise-grade architecture.
+
+Requirements:
+
+* reusable hooks
+* service-based API layer
+* typed API responses
+* retry logic
+* rate-limit protection
+* server-side caching
+* optimistic UI
+* loading skeletons
+* suspense
+* error boundaries
+* modular components
+* clean scalable folder structure
+
+---
+
+16. API ROUTES
+
+---
+
+Build:
+
+/api/meta/ad-accounts
+/api/meta/campaigns
+/api/meta/insights
+/api/meta/instagram
+/api/meta/pages
+/api/meta/leads
+/api/meta/whatsapp
+/api/meta/catalogs
+/api/generate-report
+
+All routes must:
+
+* validate inputs
+* sanitize token usage
+* handle rate limits
+* return typed responses
+* handle Meta API errors gracefully
+
+---
+
+17. SECURITY
+
+---
+
+Requirements:
+
+* never expose token in logs
+* secure proxy architecture
+* validate requests
+* prevent token leakage
+* graceful expiration handling
+
+---
+
+18. FINAL REQUIREMENTS
+
+---
+
+Generate FULL production-ready codebase.
+
+Include:
+
+* all pages
+* all components
+* all hooks
+* all utilities
+* all services
+* all API routes
+* package.json
+* tsconfig
+* Tailwind config
+* shadcn setup
+* README
+* environment example
+* reusable chart components
+* complete folder structure
+
+The final output must be:
+
+* scalable
+* clean
+* modern
+* maintainable
+* deploy-ready
+* optimized for Replit deployment
+
+Build the complete project file-by-file with production-quality code.
