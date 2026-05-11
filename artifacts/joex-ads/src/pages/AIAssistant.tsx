@@ -1,13 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAccountStore } from "@/store/accountStore";
 import { useDateStore } from "@/store/dateStore";
-import { useInsights, useCampaigns } from "@/hooks/useMeta";
+import { useInsights, useCampaigns, useAdSets, useAccountInfo } from "@/hooks/useMeta";
+import { useAccountCurrency } from "@/hooks/useCurrency";
+import { metaApi } from "@/lib/metaApi";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { BrainCircuit, Send, User, Sparkles, Loader2, RotateCcw, ChevronDown } from "lucide-react";
+import {
+  BrainCircuit, Send, User, Sparkles, Loader2, RotateCcw, ChevronDown,
+  Play, Pause, Settings2, Wallet, TrendingUp, AlertTriangle
+} from "lucide-react";
 import { safeNum, getPurchaseRoas, getAction, fmtCurrency } from "@/lib/metaApi";
 
 interface ChatMessage {
@@ -24,7 +29,7 @@ const SUGGESTED_PROMPTS = [
   "What audience targeting changes would improve my CPA?",
 ];
 
-function buildContext(insights: any, campaigns: any[]) {
+function buildContext(insights: any, campaigns: any[], adSets: any[], accountInfo: any, currency: string) {
   const d = insights?.data?.[0];
   if (!d && campaigns.length === 0) return null;
 
@@ -34,36 +39,69 @@ function buildContext(insights: any, campaigns: any[]) {
   const cpc = safeNum(d?.cpc);
   const cpm = safeNum(d?.cpm);
   const frequency = safeNum(d?.frequency);
+  const impressions = safeNum(d?.impressions);
+  const clicks = safeNum(d?.clicks);
+  const reach = safeNum(d?.reach);
   const purchases = getAction(d?.actions, "offsite_conversion.fb_pixel_purchase") || getAction(d?.actions, "purchase");
+  const leads = getAction(d?.actions, "lead") || getAction(d?.actions, "onsite_conversion.lead_grouped");
   const revenue = spend * roas;
   const cpa = purchases > 0 ? spend / purchases : 0;
 
   const topCampaigns = campaigns.slice(0, 10).map((c: any) => {
     const ci = c.insights?.data?.[0] ?? {};
     return {
+      id: c.id,
       name: c.name,
       status: c.status,
+      objective: c.objective,
       spend: safeNum(ci.spend),
       roas: getPurchaseRoas(ci.purchase_roas),
       ctr: safeNum(ci.ctr),
       frequency: safeNum(ci.frequency),
       cpc: safeNum(ci.cpc),
+      purchases: getAction(ci.actions, "offsite_conversion.fb_pixel_purchase") || getAction(ci.actions, "purchase"),
     };
   });
 
+  const topAdSets = adSets.slice(0, 15).map((a: any) => {
+    const ai = a.insights?.data?.[0] ?? {};
+    return {
+      id: a.id,
+      name: a.name,
+      status: a.status,
+      campaign_id: a.campaign_id,
+      daily_budget: safeNum(a.daily_budget) / 100,
+      spend: safeNum(ai.spend),
+      roas: getPurchaseRoas(ai.purchase_roas),
+      ctr: safeNum(ai.ctr),
+      cpm: safeNum(ai.cpm),
+      frequency: safeNum(ai.frequency),
+      cpc: safeNum(ai.cpc),
+    };
+  });
+
+  const balanceRaw = safeNum(accountInfo?.balance);
+
   return {
+    currency,
     accountSummary: {
-      totalSpend: fmtCurrency(spend),
-      totalRevenue: fmtCurrency(revenue),
+      totalSpend: fmtCurrency(spend, currency),
+      totalRevenue: fmtCurrency(revenue, currency),
       roas: `${roas.toFixed(2)}x`,
       ctr: `${ctr.toFixed(2)}%`,
-      cpc: fmtCurrency(cpc),
-      cpm: fmtCurrency(cpm),
+      cpc: fmtCurrency(cpc, currency),
+      cpm: fmtCurrency(cpm, currency),
       frequency: frequency.toFixed(2),
+      impressions: impressions.toLocaleString(),
+      clicks: clicks.toLocaleString(),
+      reach: reach.toLocaleString(),
       purchases,
-      cpa: cpa > 0 ? fmtCurrency(cpa) : "N/A",
+      leads,
+      cpa: cpa > 0 ? fmtCurrency(cpa, currency) : "N/A",
+      balance: balanceRaw > 0 ? fmtCurrency(balanceRaw, currency) : "N/A",
     },
     topCampaigns,
+    topAdSets,
   };
 }
 
@@ -112,11 +150,125 @@ function MessageBubble({ msg, isStreaming }: { msg: ChatMessage; isStreaming?: b
   );
 }
 
+interface ActionState {
+  loading: boolean;
+  done: boolean;
+  error: string | null;
+}
+
+function QuickActionsPanel({ campaigns, adSets, currency }: {
+  campaigns: any[];
+  adSets: any[];
+  currency: string;
+}) {
+  const [actionState, setActionState] = useState<Record<string, ActionState>>({});
+
+  const runAction = async (key: string, fn: () => Promise<any>) => {
+    setActionState((s) => ({ ...s, [key]: { loading: true, done: false, error: null } }));
+    try {
+      await fn();
+      setActionState((s) => ({ ...s, [key]: { loading: false, done: true, error: null } }));
+    } catch (e: any) {
+      setActionState((s) => ({ ...s, [key]: { loading: false, done: false, error: e.message } }));
+    }
+  };
+
+  const lowRoasCampaigns = campaigns.filter((c: any) => {
+    const ci = c.insights?.data?.[0] ?? {};
+    const roas = getPurchaseRoas(ci.purchase_roas);
+    const spend = safeNum(ci.spend);
+    return spend > 0 && roas > 0 && roas < 1.5 && c.status === "ACTIVE";
+  }).slice(0, 3);
+
+  const highFreqAdSets = adSets.filter((a: any) => {
+    const ai = a.insights?.data?.[0] ?? {};
+    const freq = safeNum(ai.frequency);
+    return freq > 3.5 && a.status === "ACTIVE";
+  }).slice(0, 3);
+
+  if (lowRoasCampaigns.length === 0 && highFreqAdSets.length === 0) return null;
+
+  return (
+    <Card className="bg-card/30 border-card-border shrink-0">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Settings2 className="h-4 w-4 text-primary" />
+          <span className="text-sm font-semibold text-foreground">Quick Actions</span>
+          <Badge variant="outline" className="text-[10px] ml-auto border-yellow-500/30 text-yellow-400">AI Suggested</Badge>
+        </div>
+        <div className="space-y-2">
+          {lowRoasCampaigns.map((c: any) => {
+            const key = `pause-campaign-${c.id}`;
+            const state = actionState[key];
+            const ci = c.insights?.data?.[0] ?? {};
+            const roas = getPurchaseRoas(ci.purchase_roas);
+            return (
+              <div key={key} className="flex items-center justify-between gap-2 py-2 border-b border-border/40 last:border-0">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-foreground truncate max-w-[180px]">{c.name}</div>
+                  <div className="text-[10px] text-red-400 flex items-center gap-1">
+                    <TrendingUp className="h-2.5 w-2.5" />
+                    ROAS {roas.toFixed(2)}x — below breakeven
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 h-7 text-xs border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+                  disabled={state?.loading || state?.done}
+                  onClick={() => runAction(key, () => metaApi.actions.setCampaignStatus(c.id, "PAUSED"))}
+                >
+                  {state?.loading ? <Loader2 className="h-3 w-3 animate-spin" /> :
+                   state?.done ? "Paused ✓" :
+                   state?.error ? "Error" :
+                   <><Pause className="h-3 w-3 mr-1" />Pause</>}
+                </Button>
+              </div>
+            );
+          })}
+          {highFreqAdSets.map((a: any) => {
+            const key = `pause-adset-${a.id}`;
+            const state = actionState[key];
+            const ai = a.insights?.data?.[0] ?? {};
+            const freq = safeNum(ai.frequency);
+            return (
+              <div key={key} className="flex items-center justify-between gap-2 py-2 border-b border-border/40 last:border-0">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-foreground truncate max-w-[180px]">{a.name}</div>
+                  <div className="text-[10px] text-orange-400 flex items-center gap-1">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    Frequency {freq.toFixed(1)} — ad fatigue risk
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 h-7 text-xs border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
+                  disabled={state?.loading || state?.done}
+                  onClick={() => runAction(key, () => metaApi.actions.setAdSetStatus(a.id, "PAUSED"))}
+                >
+                  {state?.loading ? <Loader2 className="h-3 w-3 animate-spin" /> :
+                   state?.done ? "Paused ✓" :
+                   state?.error ? "Error" :
+                   <><Pause className="h-3 w-3 mr-1" />Pause</>}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AIAssistant() {
   const { selectedAccountId } = useAccountStore();
   const { since, until } = useDateStore();
+  const currency = useAccountCurrency();
   const { data: insightsData } = useInsights(selectedAccountId, since, until);
   const { data: campaignData } = useCampaigns(selectedAccountId, since, until);
+  const { data: adSetsData } = useAdSets(selectedAccountId, since, until);
+  const { data: accountInfoData } = useAccountInfo(selectedAccountId);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -125,7 +277,9 @@ export default function AIAssistant() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const context = buildContext(insightsData, campaignData?.data ?? []);
+  const campaigns: any[] = campaignData?.data ?? [];
+  const adSets: any[] = adSetsData?.data ?? [];
+  const context = buildContext(insightsData, campaigns, adSets, accountInfoData, currency);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -224,9 +378,9 @@ export default function AIAssistant() {
   const isEmpty = messages.length === 0 && !isLoading;
 
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-112px)] gap-0">
+    <div className="flex flex-col h-full max-h-[calc(100vh-112px)] gap-3">
       {/* Header */}
-      <div className="flex items-center justify-between pb-4 shrink-0">
+      <div className="flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
             <BrainCircuit className="h-8 w-8 text-secondary" />
@@ -240,7 +394,7 @@ export default function AIAssistant() {
           {context && (
             <Badge variant="outline" className="text-xs border-green-500/30 text-green-400">
               <span className="h-1.5 w-1.5 rounded-full bg-green-400 mr-1.5 inline-block" />
-              Account data loaded
+              {campaigns.length} campaigns · {adSets.length} ad sets loaded
             </Badge>
           )}
           {messages.length > 0 && (
@@ -251,6 +405,11 @@ export default function AIAssistant() {
           )}
         </div>
       </div>
+
+      {/* Quick Actions Panel */}
+      {context && campaigns.length > 0 && (
+        <QuickActionsPanel campaigns={campaigns} adSets={adSets} currency={currency} />
+      )}
 
       {/* Chat area */}
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -268,7 +427,7 @@ export default function AIAssistant() {
                 <h3 className="text-lg font-semibold text-foreground">Ask your AI media buyer anything</h3>
                 <p className="text-muted-foreground text-sm mt-1 max-w-sm">
                   {context
-                    ? "Your account data is loaded. I can analyze your specific performance numbers."
+                    ? "Your account data is loaded — I can analyze your specific performance numbers and ad sets."
                     : "Connect an ad account above for data-driven analysis, or ask general strategy questions."}
                 </p>
               </div>

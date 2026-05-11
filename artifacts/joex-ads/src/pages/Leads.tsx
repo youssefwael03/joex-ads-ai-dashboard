@@ -18,7 +18,7 @@ export default function Leads() {
 
   const { data: pagesData, isLoading: pagesLoading } = usePages(!!token);
   const { data: formsData, isLoading: formsLoading } = useLeadForms(selectedPageId);
-  const { data: leadsData, isLoading: leadsLoading } = useLeads(selectedFormId);
+  const { data: leadsData, isLoading: leadsLoading } = useLeads(selectedFormId, selectedPageId);
 
   const pages: any[] = pagesData?.data ?? [];
   const forms: any[] = formsData?.data ?? [];

@@ -1,0 +1,298 @@
+You are now working on the FINAL CORE SYSTEM INTEGRATION phase for this AI ads analytics SaaS platform.
+
+Several critical systems are still partially disconnected, using shallow logic, or not fully integrated with Meta APIs.
+
+Your task is to deeply integrate, stabilize, and productionize the ENTIRE platform so it behaves like a real enterprise AI ad intelligence system.
+
+========================================
+
+1. FULL AI ASSISTANT API INTEGRATION
+   ========================================
+
+The AI Assistant is currently too limited and mostly reads summarized dashboard data.
+
+This is NOT acceptable.
+
+The AI assistant must be fully connected to the REAL Meta Ads API layer and internal platform systems.
+
+The assistant should have full contextual access to:
+
+* Ad accounts
+* Campaigns
+* Ad sets
+* Ads
+* Creatives
+* Spend
+* ROAS
+* CTR
+* CPC
+* CPM
+* Purchases
+* Leads
+* Budget usage
+* Audience data
+* Instagram data
+* Lead forms
+* Alerts
+* Reports
+* Historical trends
+
+The AI assistant should NOT rely only on dashboard summaries.
+
+It must be capable of:
+
+* Reading real account data dynamically
+* Answering advanced account questions
+* Generating deep analysis
+* Detecting issues
+* Suggesting optimizations
+* Creating reports
+* Comparing campaigns
+* Explaining performance changes
+
+AND MOST IMPORTANT:
+
+The assistant should support ACTIONS, not just analysis.
+
+Examples:
+
+* Pause campaigns
+* Enable campaigns
+* Change budgets
+* Duplicate campaigns
+* Suggest scaling
+* Generate testing structures
+* Create reports
+* Filter insights
+* Trigger optimizations
+
+Implement a secure action layer connected to Meta Marketing API with:
+
+* Permission checks
+* Confirmation flows
+* Error handling
+* Activity logs
+
+The AI assistant should feel like a real AI media buyer + account manager.
+
+========================================
+2. GLOBAL CURRENCY SYSTEM — STILL BROKEN
+========================================
+
+The dashboard STILL uses USD in multiple places even when the selected ad account uses another currency.
+
+This MUST be fixed globally.
+
+Requirements:
+
+* Currency MUST come directly from the selected Meta ad account.
+* The ENTIRE application must reactively update currency everywhere.
+
+Fix currency handling in:
+
+* Dashboard
+* Campaigns
+* Ad Sets
+* Ads
+* Creatives
+* AI Insights
+* Reports
+* Alerts
+* Charts
+* KPI cards
+* Tables
+* PDF exports
+
+Examples:
+
+* If account currency = EGP → ALL metrics display in EGP
+* If account currency = AED → ALL metrics display in AED
+* If account currency = SAR → ALL metrics display in SAR
+
+Implement:
+
+* Global currency context/store
+* Unified currency formatting utility
+* Dynamic currency synchronization
+* Currency-safe calculations
+* Automatic rerender when account changes
+
+Completely remove hardcoded USD logic.
+
+========================================
+3. PROFESSIONAL REPORTING SYSTEM
+================================
+
+The Reports system currently feels basic and incomplete.
+
+Completely redesign reports to feel enterprise-grade.
+
+Add:
+
+* Modern charts
+* Professional layouts
+* AI-generated summaries
+* Trend analysis
+* Spend analysis
+* ROAS analysis
+* Creative analysis
+* Audience analysis
+* Scaling recommendations
+
+Reports should include:
+
+* Line charts
+* Bar charts
+* KPI summary cards
+* Performance comparisons
+* AI recommendations
+* Branding
+
+Reports must support:
+
+* PDF export
+* Vercel compatibility
+* Large datasets
+* Responsive rendering
+
+Make reports visually premium like a real SaaS analytics platform.
+
+========================================
+4. ALERTS SYSTEM — EGYPTIAN MARKET LOGIC
+========================================
+
+The alerts tab needs smarter budget monitoring.
+
+Implement advanced balance and spend alerts.
+
+Requirements:
+
+If ad account balance is below:
+
+* 2000 EGP
+  → trigger alert
+
+Also:
+
+* Calculate estimated daily spend automatically
+* Predict remaining ad runtime
+* Alert when balance becomes lower than projected daily spend requirements
+
+Examples:
+
+* "Your balance may only sustain ads for 1.2 more days."
+* "Balance dropped below safe scaling threshold."
+* "Daily spend exceeds remaining balance sustainability."
+
+The alert engine should support:
+
+* Egyptian market logic
+* EGP currency handling
+* Smart forecasting
+* Dynamic thresholds
+* Scaling safety alerts
+
+========================================
+5. INSTAGRAM TAB — BROKEN CONNECTION
+====================================
+
+The Instagram tab incorrectly shows:
+
+"No Instagram Business Account found"
+
+even for accounts that ARE properly connected.
+
+This means:
+
+* Instagram Graph API integration is broken
+  OR
+* Permission scopes are incomplete
+  OR
+* Facebook Page mapping is incorrect
+  OR
+* Instagram Business Account lookup logic is wrong
+
+Fully debug and fix Instagram integration.
+
+Requirements:
+
+* Correctly detect linked Instagram Business Accounts
+* Correctly map Facebook Pages to Instagram accounts
+* Fetch real Instagram metrics
+* Fetch engagement metrics
+* Fetch media/posts/reels insights
+* Handle permission validation properly
+
+Verify required permissions:
+
+* instagram_basic
+* instagram_manage_insights
+* pages_show_list
+* pages_read_engagement
+* business_management
+
+Implement robust fallback handling and debugging logs.
+
+========================================
+6. LEADS TAB — ALSO BROKEN
+==========================
+
+The Leads tab currently fails similarly to Instagram integration.
+
+Fix the complete leads pipeline.
+
+Requirements:
+
+* Fetch real Meta lead form data
+* Fetch lead counts
+* Fetch CPL metrics
+* Fetch form performance
+* Handle pagination
+* Handle permissions
+* Handle account switching
+* Handle date range filtering
+
+Verify required permissions and API endpoints.
+
+========================================
+7. FINAL STABILIZATION & DEPLOYMENT CLEANUP
+===========================================
+
+After all fixes:
+
+* Audit the entire project
+* Remove all placeholder/demo logic
+* Remove dead code
+* Remove broken imports
+* Remove duplicate utilities
+* Fix build warnings
+* Fix TypeScript issues
+* Fix hydration issues
+* Fix API edge cases
+* Optimize performance
+* Optimize caching
+
+Before completion:
+
+* npm run build must pass
+* npm run lint must pass
+* TypeScript must pass
+* Project must run without runtime crashes
+* Project must deploy cleanly on Vercel
+* GitHub repo must be production-ready
+
+Generate:
+
+* Clean README
+* .env.example
+* Deployment instructions
+* Production setup guide
+* Troubleshooting guide
+
+The final result should feel like:
+
+* A premium AI advertising SaaS
+* A real Meta Ads intelligence platform
+* Enterprise-grade
+* Production-ready
+* Stable and scalable

@@ -18,6 +18,14 @@ export const useAdAccounts = (enabled: boolean) =>
     staleTime: 10 * 60 * 1000,
   });
 
+export const useAccountInfo = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["meta", "account-info", accountId],
+    queryFn: () => metaApi.getAccountInfo(accountId!),
+    enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
+  });
+
 export const useInsights = (accountId: string | null, since: string, until: string) =>
   useQuery({
     queryKey: ["meta", "insights", accountId, since, until],
@@ -85,6 +93,7 @@ export const useInstagram = (pageId: string | null) =>
     queryFn: () => metaApi.getInstagram(pageId!),
     enabled: !!pageId,
     staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
 
 export const useLeadForms = (pageId: string | null) =>
@@ -95,10 +104,10 @@ export const useLeadForms = (pageId: string | null) =>
     staleTime: 5 * 60 * 1000,
   });
 
-export const useLeads = (formId: string | null) =>
+export const useLeads = (formId: string | null, pageId?: string | null) =>
   useQuery({
-    queryKey: ["meta", "leads", formId],
-    queryFn: () => metaApi.getLeads(formId!),
+    queryKey: ["meta", "leads", formId, pageId],
+    queryFn: () => metaApi.getLeads(formId!, pageId ?? undefined),
     enabled: !!formId,
     staleTime: 2 * 60 * 1000,
   });

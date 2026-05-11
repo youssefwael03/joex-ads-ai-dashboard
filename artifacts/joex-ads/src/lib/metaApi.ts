@@ -22,9 +22,32 @@ export const fetchMeta = async (endpoint: string, params?: Record<string, string
   return res.json();
 };
 
+export const postMeta = async (endpoint: string, body: Record<string, unknown>) => {
+  const token = localStorage.getItem("joex_ads_token");
+  if (!token) throw new Error("No Meta token found");
+
+  const res = await fetch(`/api/meta${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Meta-Token": token,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    const msg = (errorData as any)?.error?.message || (errorData as any)?.error || `Meta API Error: ${res.status} ${res.statusText}`;
+    throw new Error(String(msg));
+  }
+
+  return res.json();
+};
+
 export const metaApi = {
   getMe: () => fetchMeta("/me"),
   getAdAccounts: () => fetchMeta("/ad-accounts"),
+  getAccountInfo: (accountId: string) => fetchMeta("/account-info", { account_id: accountId }),
   getInsights: (accountId: string, since: string, until: string) =>
     fetchMeta("/insights", { account_id: accountId, since, until }),
   getInsightsDaily: (accountId: string, since: string, until: string) =>
@@ -39,10 +62,22 @@ export const metaApi = {
     fetchMeta("/ads", { account_id: accountId, since, until }),
   getPages: () => fetchMeta("/pages"),
   getInstagram: (pageId: string) => fetchMeta("/instagram", { page_id: pageId }),
-  getLeads: (formId: string) => fetchMeta("/leads", { form_id: formId }),
+  getLeads: (formId: string, pageId?: string) =>
+    fetchMeta("/leads", { form_id: formId, ...(pageId ? { page_id: pageId } : {}) }),
   getLeadForms: (pageId: string) => fetchMeta("/lead-forms", { page_id: pageId }),
   getCatalogs: (businessId: string) => fetchMeta("/catalogs", { business_id: businessId }),
   getCatalogProducts: (catalogId: string) => fetchMeta("/catalog-products", { catalog_id: catalogId }),
+
+  actions: {
+    setCampaignStatus: (campaignId: string, status: "ACTIVE" | "PAUSED") =>
+      postMeta(`/campaigns/${campaignId}/status`, { status }),
+    setCampaignBudget: (campaignId: string, daily_budget: number) =>
+      postMeta(`/campaigns/${campaignId}/budget`, { daily_budget }),
+    setAdSetStatus: (adSetId: string, status: "ACTIVE" | "PAUSED") =>
+      postMeta(`/adsets/${adSetId}/status`, { status }),
+    setAdSetBudget: (adSetId: string, daily_budget: number) =>
+      postMeta(`/adsets/${adSetId}/budget`, { daily_budget }),
+  },
 };
 
 // ── Safe metric parsers ────────────────────────────────────────────────────────
@@ -65,14 +100,12 @@ export function fmtNumber(v: unknown): string {
   return safeNum(v).toLocaleString("en-US");
 }
 
-/** Extracts a named action value from Meta's actions[] array */
 export function getAction(actions: any[] | undefined, type: string): number {
   if (!Array.isArray(actions)) return 0;
   const match = actions.find((a) => a.action_type === type);
   return safeNum(match?.value);
 }
 
-/** Extracts purchase ROAS from Meta's purchase_roas[] array */
 export function getPurchaseRoas(roas: any[] | undefined): number {
   if (!Array.isArray(roas) || roas.length === 0) return 0;
   return safeNum(roas[0]?.value);
