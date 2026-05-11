@@ -1,0 +1,190 @@
+CRITICAL PRIORITY FIX REQUIRED
+
+The platform is STILL failing in the most important core functionality.
+
+The following modules are STILL NOT reading or rendering real Meta Ads data correctly:
+
+* Campaigns tab
+* Ad Sets tab
+* Ads tab
+* Creatives tab
+* AI Insights tab
+
+The UI exists, but the actual data layer is broken, disconnected, incomplete, mocked, or improperly mapped.
+
+You must STOP focusing on cosmetic improvements and PRIORITIZE fixing the REAL DATA ARCHITECTURE first.
+
+========================================
+MAIN ISSUE TO FIX NOW
+=====================
+
+The dashboard successfully connects to Meta and fetches ad accounts.
+
+BUT:
+
+* Campaigns are not loading correctly
+* Ad sets are not loading correctly
+* Ads are not loading correctly
+* Creatives are not loading correctly
+* AI Insights cannot analyze real data
+* Some tabs show empty states despite existing data
+
+This means:
+
+* The API integration layer is broken
+  OR
+* Data normalization is broken
+  OR
+* State management is broken
+  OR
+* Data mapping between Meta responses and UI components is incorrect
+
+========================================
+YOU MUST FULLY DEBUG THE ENTIRE DATA PIPELINE
+=============================================
+
+Investigate and fix:
+
+* API fetch functions
+* Meta endpoint responses
+* Async handling
+* Query params
+* Selected account synchronization
+* Date range synchronization
+* State hydration
+* Data stores
+* Client/server boundaries
+* API response mapping
+* Data transformers
+* Caching logic
+* React query/state issues
+* Loading conditions
+* Null handling
+* Error handling
+
+Ensure ALL tabs dynamically refresh when:
+
+* Ad account changes
+* Date range changes
+* Filters change
+
+========================================
+REAL META DATA REQUIREMENT
+==========================
+
+The following entities MUST load REAL data from Meta Ads API:
+
+Campaigns:
+
+* Name
+* Status
+* Spend
+* ROAS
+* CTR
+* CPC
+* CPM
+* Purchases
+* CPA
+* Reach
+* Frequency
+
+Ad Sets:
+
+* Audience
+* Budget
+* Optimization goal
+* Performance metrics
+
+Ads:
+
+* Creative
+* Performance
+* Conversion metrics
+* Engagement metrics
+
+Creatives:
+
+* Image/video
+* Primary text
+* Headlines
+* CTA
+* Creative performance
+* Hook analysis
+* AI scoring
+
+========================================
+AI INSIGHTS REQUIREMENT
+=======================
+
+AI Insights MUST use REAL fetched campaign data.
+
+NO MOCK INSIGHTS.
+NO HARDCODED RESPONSES.
+NO PLACEHOLDER ANALYSIS.
+
+The AI system must analyze:
+
+* Actual ROAS
+* Actual CTR
+* Actual CPA
+* Actual CPM
+* Actual spend trends
+* Actual conversion trends
+
+Then generate REAL recommendations.
+
+========================================
+GLOBAL CURRENCY BUG — STILL NOT FIXED
+=====================================
+
+The dashboard STILL displays USD in analytics despite the ad account currency being different.
+
+This is a MAJOR architecture issue.
+
+You must implement a GLOBAL currency system.
+
+Requirements:
+
+* Currency MUST come directly from selected Meta ad account.
+* Entire app must reactively update currency everywhere.
+* Dashboard tab must update currency.
+* Campaigns tab must update currency.
+* Ad sets tab must update currency.
+* Ads tab must update currency.
+* Creative analysis must update currency.
+* AI insights must update currency.
+* PDF reports must update currency.
+
+Implement:
+
+* Global currency context/store
+* Unified formatting utilities
+* Dynamic currency hooks
+* Currency-safe analytics calculations
+
+DO NOT hardcode USD anywhere.
+
+========================================
+EXPECTED FINAL RESULT
+=====================
+
+After fixes:
+
+* Every analytics tab must read real Meta data correctly
+* Every metric must be accurate
+* AI insights must be data-driven
+* Currency must dynamically sync with account
+* No mocked/demo logic should remain
+* The platform should behave like a real production analytics SaaS
+
+BEFORE FINISHING:
+
+* Test multiple ad accounts
+* Test multiple currencies
+* Test empty accounts
+* Test date range switching
+* Test loading states
+* Test Vercel production build
+* Ensure npm run build passes
+* Ensure TypeScript passes
+* Ensure no runtime crashes exist

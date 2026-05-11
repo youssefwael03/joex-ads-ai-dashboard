@@ -3,7 +3,7 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
-const META_BASE = "https://graph.facebook.com/v19.0";
+const META_BASE = "https://graph.facebook.com/v22.0";
 
 async function metaFetch(
   path: string,
@@ -53,12 +53,23 @@ function normalizeAccountId(id: string): string {
   return id.startsWith("act_") ? id.slice(4) : id;
 }
 
-/** Build the date params block — never send both date_preset and time_range */
-function buildDateParams(since?: string, until?: string): Record<string, string> {
+/** Safely extract a single string value from an Express query param (handles arrays and ParsedQs). */
+function qs(val: unknown): string | undefined {
+  if (typeof val === "string") return val;
+  if (Array.isArray(val) && typeof val[0] === "string") return val[0] as string;
+  return undefined;
+}
+
+/**
+ * Build the correct Meta Graph API field-level parameter for date filtering.
+ * Meta's nested field expansion syntax: insights.time_range({"since":"...","until":"..."}){...}
+ * NOT query params — these are inline field parameters.
+ */
+function insightDateParam(since?: string, until?: string): string {
   if (since && until) {
-    return { time_range: JSON.stringify({ since, until }) };
+    return `.time_range(${JSON.stringify({ since, until })})`;
   }
-  return { date_preset: "last_30d" };
+  return `.date_preset(last_30d)`;
 }
 
 router.get("/meta/me", async (req, res): Promise<void> => {
@@ -90,18 +101,22 @@ router.get("/meta/insights", async (req, res): Promise<void> => {
   const token = getToken(req);
   if (!token) { res.status(401).json({ error: "Missing X-Meta-Token header" }); return; }
 
-  const rawId = Array.isArray(req.query.account_id) ? req.query.account_id[0] : (req.query.account_id as string);
+  const rawId = qs(req.query.account_id);
   if (!rawId) { res.status(400).json({ error: "account_id is required" }); return; }
   const accountId = normalizeAccountId(rawId);
 
-  const since = req.query.since as string | undefined;
-  const until = req.query.until as string | undefined;
-  const level = (req.query.level as string) || "account";
+  const since = qs(req.query.since);
+  const until = qs(req.query.until);
+  const level = qs(req.query.level) ?? "account";
+
+  const dateParams: Record<string, string> = since && until
+    ? { time_range: JSON.stringify({ since, until }) }
+    : { date_preset: "last_30d" };
 
   const params: Record<string, string> = {
     fields: "spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas,unique_clicks,outbound_clicks",
     level,
-    ...buildDateParams(since, until),
+    ...dateParams,
   };
 
   const { data, status } = await metaFetch(`/act_${accountId}/insights`, token, params);
@@ -112,18 +127,22 @@ router.get("/meta/insights-daily", async (req, res): Promise<void> => {
   const token = getToken(req);
   if (!token) { res.status(401).json({ error: "Missing X-Meta-Token header" }); return; }
 
-  const rawId = Array.isArray(req.query.account_id) ? req.query.account_id[0] : (req.query.account_id as string);
+  const rawId = qs(req.query.account_id);
   if (!rawId) { res.status(400).json({ error: "account_id is required" }); return; }
   const accountId = normalizeAccountId(rawId);
 
-  const since = req.query.since as string | undefined;
-  const until = req.query.until as string | undefined;
+  const since = qs(req.query.since);
+  const until = qs(req.query.until);
+
+  const dateParams: Record<string, string> = since && until
+    ? { time_range: JSON.stringify({ since, until }) }
+    : { date_preset: "last_30d" };
 
   const params: Record<string, string> = {
     fields: "date_start,date_stop,spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,purchase_roas",
     time_increment: "1",
     level: "account",
-    ...buildDateParams(since, until),
+    ...dateParams,
   };
 
   const { data, status } = await metaFetch(`/act_${accountId}/insights`, token, params);
@@ -134,19 +153,23 @@ router.get("/meta/insights-breakdown", async (req, res): Promise<void> => {
   const token = getToken(req);
   if (!token) { res.status(401).json({ error: "Missing X-Meta-Token header" }); return; }
 
-  const rawId = Array.isArray(req.query.account_id) ? req.query.account_id[0] : (req.query.account_id as string);
+  const rawId = qs(req.query.account_id);
   if (!rawId) { res.status(400).json({ error: "account_id is required" }); return; }
   const accountId = normalizeAccountId(rawId);
 
-  const breakdown = (req.query.breakdown as string) || "country";
-  const since = req.query.since as string | undefined;
-  const until = req.query.until as string | undefined;
+  const breakdown = qs(req.query.breakdown) ?? "country";
+  const since = qs(req.query.since);
+  const until = qs(req.query.until);
+
+  const dateParams: Record<string, string> = since && until
+    ? { time_range: JSON.stringify({ since, until }) }
+    : { date_preset: "last_30d" };
 
   const params: Record<string, string> = {
     fields: "spend,impressions,reach,clicks,ctr,cpm,cpc",
     breakdowns: breakdown,
     level: "account",
-    ...buildDateParams(since, until),
+    ...dateParams,
   };
 
   const { data, status } = await metaFetch(`/act_${accountId}/insights`, token, params);
@@ -157,16 +180,20 @@ router.get("/meta/campaigns", async (req, res): Promise<void> => {
   const token = getToken(req);
   if (!token) { res.status(401).json({ error: "Missing X-Meta-Token header" }); return; }
 
-  const rawId = Array.isArray(req.query.account_id) ? req.query.account_id[0] : (req.query.account_id as string);
+  const rawId = qs(req.query.account_id);
   if (!rawId) { res.status(400).json({ error: "account_id is required" }); return; }
   const accountId = normalizeAccountId(rawId);
 
-  const since = req.query.since as string | undefined;
-  const until = req.query.until as string | undefined;
+  const since = qs(req.query.since);
+  const until = qs(req.query.until);
 
-  const dateClause = since && until ? `,"insights.time_range":${JSON.stringify({ since, until })}` : "";
+  // CORRECT Meta Graph API nested field expansion syntax:
+  // insights.time_range({"since":"...","until":"..."}){field1,field2,...}
+  const dateParam = insightDateParam(since, until);
+  const insightFields = "spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas,unique_clicks";
+
   const params: Record<string, string> = {
-    fields: `id,name,status,objective,budget_remaining,daily_budget,lifetime_budget,insights${dateClause}{spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas,quality_ranking,engagement_rate_ranking,conversion_rate_ranking}`,
+    fields: `id,name,status,objective,budget_remaining,daily_budget,lifetime_budget,insights${dateParam}{${insightFields}}`,
     limit: "100",
   };
 
@@ -178,16 +205,18 @@ router.get("/meta/adsets", async (req, res): Promise<void> => {
   const token = getToken(req);
   if (!token) { res.status(401).json({ error: "Missing X-Meta-Token header" }); return; }
 
-  const rawId = Array.isArray(req.query.account_id) ? req.query.account_id[0] : (req.query.account_id as string);
+  const rawId = qs(req.query.account_id);
   if (!rawId) { res.status(400).json({ error: "account_id is required" }); return; }
   const accountId = normalizeAccountId(rawId);
 
-  const since = req.query.since as string | undefined;
-  const until = req.query.until as string | undefined;
+  const since = qs(req.query.since);
+  const until = qs(req.query.until);
 
-  const dateClause = since && until ? `,"insights.time_range":${JSON.stringify({ since, until })}` : "";
+  const dateParam = insightDateParam(since, until);
+  const insightFields = "spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas";
+
   const params: Record<string, string> = {
-    fields: `id,name,status,campaign_id,daily_budget,lifetime_budget,insights${dateClause}{spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas}`,
+    fields: `id,name,status,campaign_id,daily_budget,lifetime_budget,optimization_goal,billing_event,targeting,insights${dateParam}{${insightFields}}`,
     limit: "200",
   };
 
@@ -199,16 +228,18 @@ router.get("/meta/ads", async (req, res): Promise<void> => {
   const token = getToken(req);
   if (!token) { res.status(401).json({ error: "Missing X-Meta-Token header" }); return; }
 
-  const rawId = Array.isArray(req.query.account_id) ? req.query.account_id[0] : (req.query.account_id as string);
+  const rawId = qs(req.query.account_id);
   if (!rawId) { res.status(400).json({ error: "account_id is required" }); return; }
   const accountId = normalizeAccountId(rawId);
 
-  const since = req.query.since as string | undefined;
-  const until = req.query.until as string | undefined;
+  const since = qs(req.query.since);
+  const until = qs(req.query.until);
 
-  const dateClause = since && until ? `,"insights.time_range":${JSON.stringify({ since, until })}` : "";
+  const dateParam = insightDateParam(since, until);
+  const insightFields = "spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas";
+
   const params: Record<string, string> = {
-    fields: `id,name,status,adset_id,campaign_id,creative{id,name,thumbnail_url,image_url,video_id},insights${dateClause}{spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,cost_per_action_type,purchase_roas}`,
+    fields: `id,name,status,adset_id,campaign_id,creative{id,name,thumbnail_url,image_url,video_id,body,title,call_to_action_type},insights${dateParam}{${insightFields}}`,
     limit: "200",
   };
 
