@@ -9,6 +9,7 @@ async function metaFetch(
   path: string,
   token: string,
   params: Record<string, string> = {},
+  retries = 3,
 ): Promise<{ data: unknown; status: number }> {
   const url = new URL(`${META_BASE}${path}`);
   url.searchParams.set("access_token", token);
@@ -16,9 +17,26 @@ async function metaFetch(
     url.searchParams.set(k, v);
   }
 
-  const res = await fetch(url.toString());
-  const data = await res.json();
-  return { data, status: res.status };
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) });
+      const data = await res.json();
+      // Rate-limited — back off and retry
+      if (res.status === 429 || (res.status === 400 && (data as any)?.error?.code === 17)) {
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return { data, status: res.status };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries - 1) {
+        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 500));
+      }
+    }
+  }
+  throw lastErr ?? new Error("Meta fetch failed after retries");
 }
 
 function getToken(req: { headers: Record<string, string | string[] | undefined> }): string | null {

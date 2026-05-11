@@ -1,0 +1,305 @@
+You are a senior full-stack SaaS engineer, AI systems architect, DevOps engineer, and performance marketing analyst.
+
+I will upload a complete project ZIP for my ads analytics dashboard platform.
+Your task is to fully analyze, refactor, upgrade, optimize, and fix the entire system to production-level quality.
+
+The platform should become a powerful AI-driven ads analytics SaaS inspired by GoMarble, Triple Whale, and Looker Studio — but fully custom branded and fully owned by me.
+
+The final project MUST be fully stable, scalable, optimized, and deployment-ready for Vercel production hosting.
+
+========================================
+PRIMARY OBJECTIVES
+==================
+
+* Fix all bugs and broken features.
+* Improve architecture, performance, scalability, and UI/UX.
+* Add advanced AI-powered analysis and recommendations.
+* Make the dashboard feel premium, modern, and enterprise-grade.
+* Ensure everything works end-to-end with no runtime or build issues.
+* Ensure the project is fully deployable on Vercel without errors.
+
+========================================
+
+1. META ADS API INTEGRATION
+   ========================================
+
+Fix and optimize the complete Meta Ads API system.
+
+Requirements:
+
+* Ensure campaigns, ad sets, creatives, and ads load correctly.
+* Fix all broken fetching logic.
+* Ensure data consistency and accuracy.
+
+Support:
+
+* Spend
+* ROAS
+* CTR
+* CPC
+* CPM
+* Purchases
+* CPA
+* Frequency
+* Conversion value
+* Creative performance
+* Attribution metrics
+
+Add:
+
+* Automatic token validation
+* Token refresh handling
+* Error recovery
+* Retry logic
+* API rate-limit handling
+* Smart caching
+* Account switching
+* Historical syncing
+* Real-time syncing
+
+========================================
+2. AI CREATIVE ANALYSIS ENGINE
+==============================
+
+The current creative analysis is weak or broken.
+
+Build a complete AI creative intelligence system.
+
+The AI must:
+
+* Analyze images
+* Analyze videos
+* Analyze headlines
+* Analyze ad copy
+* Detect winning patterns
+* Detect weak creatives
+* Generate actionable recommendations
+
+Analyze:
+
+* Hooks
+* CTA strength
+* Emotional triggers
+* Offer clarity
+* Product focus
+* Scroll-stopping ability
+* Text density
+* Branding visibility
+* Visual hierarchy
+* Color psychology
+* UGC style
+* Direct-response structure
+* Conversion potential
+
+Add:
+
+* Creative scoring system
+* AI-generated recommendations
+* “Why this creative is winning”
+* “Why this creative is failing”
+* Suggested improvements
+* Similar winning creative concepts
+* AI creative testing ideas
+
+========================================
+3. AI MEDIA BUYER ASSISTANT
+===========================
+
+Build an embedded AI media buyer assistant.
+
+The AI assistant should:
+
+* Analyze account performance
+* Detect scaling opportunities
+* Detect ad fatigue
+* Detect wasted spend
+* Detect audience overlap
+* Detect weak creatives
+* Suggest budget reallocations
+* Suggest scaling strategies
+* Suggest creative testing strategies
+* Generate optimization recommendations automatically
+
+The assistant should behave like a top-tier senior performance marketer.
+
+========================================
+4. GO MARBLE-STYLE EXPERIENCE
+=============================
+
+Study the UX patterns, workflow logic, reporting systems, automation ideas, optimization systems, and creative intelligence concepts similar to GoMarble-style ad intelligence platforms.
+
+DO NOT copy branding or proprietary assets.
+
+Instead:
+
+* Build original implementations
+* Build similar workflow intelligence
+* Build similar optimization experiences
+* Build similar reporting depth
+* Build similar creative analysis systems
+
+Everything must remain:
+
+* Fully original
+* Fully custom-branded
+* Fully owned by me
+* Fully independent architecture
+
+========================================
+5. PREMIUM UI/UX REDESIGN
+=========================
+
+Redesign the entire dashboard to feel like a premium modern SaaS platform.
+
+Design direction:
+
+* Dark luxury UI
+* Gold accent colors
+* Smooth animations
+* Glassmorphism
+* Clean typography
+* Modern SaaS aesthetics
+* Responsive layout
+
+Improve:
+
+* Sidebar navigation
+* Charts
+* Analytics cards
+* Tables
+* Filters
+* Date selectors
+* Loading states
+* Empty states
+* Error handling
+* Mobile responsiveness
+
+Add:
+
+* Smooth transitions
+* Better visual hierarchy
+* Interactive analytics
+* Modern dashboards
+* Better usability
+
+========================================
+6. ADVANCED ANALYTICS SYSTEM
+============================
+
+Add:
+
+* Trend detection
+* Performance anomaly detection
+* Daily/weekly/monthly comparison analysis
+* Best creative finder
+* Best audience finder
+* Winning angle detection
+* Budget pacing analysis
+* Funnel analysis
+* Attribution insights
+* Performance forecasting
+
+Create visual dashboards for:
+
+* ROAS trends
+* Spend trends
+* Creative winners
+* Audience performance
+* Scaling opportunities
+* AI recommendations
+
+========================================
+7. SYSTEM ARCHITECTURE & CODE QUALITY
+=====================================
+
+Refactor the project for:
+
+* Clean architecture
+* Reusable components
+* Modular code structure
+* Scalable folder organization
+* Type safety
+* Better API abstraction
+* Better state management
+* Production readiness
+
+Fix:
+
+* Build failures
+* TypeScript errors
+* Broken imports
+* Runtime crashes
+* API failures
+* Hydration issues
+* State bugs
+* Performance bottlenecks
+* Memory leaks
+
+========================================
+8. TECH STACK REQUIREMENTS
+==========================
+
+Preferred stack:
+
+* Next.js latest stable version
+* TypeScript
+* Tailwind CSS
+* shadcn/ui
+* Framer Motion
+* Recharts
+* Zustand or Redux
+* Server Actions
+* API Routes
+* PostgreSQL or Supabase
+* Secure environment variable handling
+
+========================================
+9. VERCEL DEPLOYMENT REQUIREMENTS
+=================================
+
+The project MUST be fully optimized for Vercel deployment.
+
+Before finishing:
+
+* Ensure npm run build succeeds with zero errors.
+* Ensure npm run lint passes.
+* Ensure TypeScript passes completely.
+* Remove all deployment-breaking issues.
+* Fix all environment variable problems.
+* Ensure all imports and paths work correctly.
+* Ensure no server/client conflicts exist.
+* Ensure all pages compile successfully.
+* Ensure the project works in production mode.
+* Optimize bundle size and performance.
+* Ensure fast loading and proper caching.
+* Ensure compatibility with Vercel serverless deployment.
+
+Generate:
+
+* Clean .env.example
+* Deployment instructions
+* Production setup guide
+* Vercel deployment guide
+* Build verification checklist
+
+========================================
+10. FINAL DELIVERY REQUIREMENTS
+===============================
+
+When complete:
+
+* Explain every major improvement made.
+* Explain architecture changes.
+* Explain optimization systems added.
+* Explain AI systems added.
+* Explain how to run locally.
+* Explain how to deploy to Vercel.
+* Ensure the project is fully production-ready.
+
+IMPORTANT:
+
+* Do not remove useful functionality unless absolutely necessary.
+* Preserve the original product vision while massively improving it.
+* Think like a senior SaaS architect + senior AI engineer + elite media buyer.
+* Prioritize scalability, maintainability, UX quality, and real-world usability.
+* Final output must feel like a real premium SaaS product.

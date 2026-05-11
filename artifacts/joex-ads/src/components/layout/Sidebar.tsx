@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { 
   LayoutDashboard, 
@@ -11,8 +10,10 @@ import {
   Users, 
   ShoppingBag, 
   BellRing, 
-  FileText 
+  FileText,
+  MessageSquareText,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export function Sidebar() {
   const [location] = useLocation();
@@ -23,6 +24,7 @@ export function Sidebar() {
     { href: "/adsets", icon: Layers, label: "Ad Sets" },
     { href: "/ads", icon: ImageIcon, label: "Ads" },
     { href: "/ai-insights", icon: BrainCircuit, label: "AI Insights" },
+    { href: "/ai-assistant", icon: MessageSquareText, label: "AI Assistant", badge: "NEW" },
     { href: "/creatives", icon: Palette, label: "Creatives" },
     { href: "/instagram", icon: Instagram, label: "Instagram" },
     { href: "/leads", icon: Users, label: "Leads" },
@@ -44,8 +46,13 @@ export function Sidebar() {
           const isActive = location === item.href;
           return (
             <Link key={item.href} href={item.href} className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${isActive ? "bg-sidebar-accent text-sidebar-primary" : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"}`}>
-              <item.icon className={`h-4 w-4 ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/70"}`} />
-              {item.label}
+              <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-sidebar-primary" : "text-sidebar-foreground/70"}`} />
+              <span className="flex-1">{item.label}</span>
+              {"badge" in item && item.badge && (
+                <Badge className="text-[8px] px-1 py-0 h-3.5 bg-secondary/20 text-secondary border-secondary/30 border font-semibold">
+                  {item.badge}
+                </Badge>
+              )}
             </Link>
           );
         })}

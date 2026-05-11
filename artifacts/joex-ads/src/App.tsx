@@ -12,6 +12,7 @@ const Campaigns = lazy(() => import("@/pages/Campaigns"));
 const AdSets = lazy(() => import("@/pages/AdSets"));
 const Ads = lazy(() => import("@/pages/Ads"));
 const AIInsights = lazy(() => import("@/pages/AIInsights"));
+const AIAssistant = lazy(() => import("@/pages/AIAssistant"));
 const Creatives = lazy(() => import("@/pages/Creatives"));
 const Instagram = lazy(() => import("@/pages/Instagram"));
 const Leads = lazy(() => import("@/pages/Leads"));
@@ -50,6 +51,7 @@ function Router() {
                 <Route path="/adsets" component={AdSets} />
                 <Route path="/ads" component={Ads} />
                 <Route path="/ai-insights" component={AIInsights} />
+                <Route path="/ai-assistant" component={AIAssistant} />
                 <Route path="/creatives" component={Creatives} />
                 <Route path="/instagram" component={Instagram} />
                 <Route path="/leads" component={Leads} />

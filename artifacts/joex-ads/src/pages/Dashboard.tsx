@@ -153,12 +153,17 @@ export default function Dashboard() {
   ];
 
   // ── Chart data ───────────────────────────────────────────────────────────────
-  const dailyChartData = (dailyData?.data ?? []).map((d: any) => ({
-    date: d.date_start?.slice(5) ?? "",
-    spend: safeNum(d.spend),
-    roas: getPurchaseRoas(d.purchase_roas),
-    ctr: safeNum(d.ctr),
-  }));
+  const dailyChartData = (dailyData?.data ?? []).map((d: any) => {
+    const daySpend = safeNum(d.spend);
+    const dayRoas = getPurchaseRoas(d.purchase_roas);
+    return {
+      date: d.date_start?.slice(5) ?? "",
+      spend: daySpend,
+      revenue: daySpend > 0 && dayRoas > 0 ? +(daySpend * dayRoas).toFixed(2) : 0,
+      roas: dayRoas,
+      ctr: safeNum(d.ctr),
+    };
+  });
 
   const deviceChartData = (deviceData?.data ?? [])
     .filter((d: any) => d.device_platform)
@@ -259,28 +264,41 @@ export default function Dashboard() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Spend over time */}
+        {/* Revenue vs Spend */}
         {dailyLoading ? (
-          <ChartSkeleton label="Spend Over Time" />
+          <ChartSkeleton label="Revenue vs Spend" />
         ) : (
           <Card className="bg-card/40 backdrop-blur-md border-card-border">
-            <CardHeader><CardTitle className="text-base">Spend Over Time</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Revenue vs Spend</CardTitle>
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[hsl(var(--chart-2))] inline-block" />Revenue</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[hsl(var(--chart-1))] inline-block" />Spend</span>
+                </div>
+              </div>
+            </CardHeader>
             <CardContent className="h-[280px]">
               {dailyChartData.length === 0 ? (
-                <EmptyState message="No daily spend data for this period." />
+                <EmptyState message="No daily data for this period." />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={dailyChartData}>
                     <defs>
+                      <linearGradient id="gRevenue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0} />
+                      </linearGradient>
                       <linearGradient id="gSpend" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.25} />
+                        <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.15} />
                         <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
                     <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} width={55} />
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`$${safeNum(v).toFixed(2)}`, "Spend"]} />
+                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any, name: string) => [`$${safeNum(v).toFixed(2)}`, name === "revenue" ? "Revenue" : "Spend"]} />
+                    <Area type="monotone" dataKey="revenue" stroke="hsl(var(--chart-2))" fill="url(#gRevenue)" strokeWidth={2} dot={false} />
                     <Area type="monotone" dataKey="spend" stroke="hsl(var(--chart-1))" fill="url(#gSpend)" strokeWidth={2} dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
