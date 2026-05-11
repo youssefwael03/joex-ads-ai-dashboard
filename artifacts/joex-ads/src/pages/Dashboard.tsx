@@ -1,6 +1,7 @@
 import { useAccountStore } from "@/store/accountStore";
 import { useDateStore } from "@/store/dateStore";
 import { useInsights, useInsightsDaily, useInsightsBreakdown } from "@/hooks/useMeta";
+import { useFormatCurrency, useAccountCurrency } from "@/hooks/useCurrency";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,8 @@ export default function Dashboard() {
   const { selectedAccountId } = useAccountStore();
   const { since, until } = useDateStore();
   const qc = useQueryClient();
+  const fmt = useFormatCurrency();
+  const currency = useAccountCurrency();
 
   const {
     data: insightsData,
@@ -137,13 +140,13 @@ export default function Dashboard() {
     || getAction(insights?.actions, "outbound_click");
 
   const kpis = [
-    { label: "Total Spend", value: fmtCurrency(spend), highlight: false },
-    { label: "Revenue", value: fmtCurrency(revenue), highlight: revenue > 0 },
+    { label: "Total Spend", value: fmt(spend), highlight: false },
+    { label: "Revenue", value: fmt(revenue), highlight: revenue > 0 },
     { label: "ROAS", value: `${roas.toFixed(2)}x`, highlight: roas >= 2 },
     { label: "CTR", value: `${ctr.toFixed(2)}%`, highlight: false },
-    { label: "CPM", value: fmtCurrency(cpm), highlight: false },
-    { label: "CPC", value: fmtCurrency(cpc), highlight: false },
-    { label: "CPA", value: cpa > 0 ? fmtCurrency(cpa) : "—", highlight: false },
+    { label: "CPM", value: fmt(cpm), highlight: false },
+    { label: "CPC", value: fmt(cpc), highlight: false },
+    { label: "CPA", value: cpa > 0 ? fmt(cpa) : "—", highlight: false },
     { label: "Frequency", value: frequency.toFixed(2), highlight: frequency > 4 },
     { label: "Reach", value: fmtNumber(reach), highlight: false },
     { label: "Impressions", value: fmtNumber(impressions), highlight: false },
@@ -296,8 +299,8 @@ export default function Dashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                     <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} width={55} />
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any, name: string) => [`$${safeNum(v).toFixed(2)}`, name === "revenue" ? "Revenue" : "Spend"]} />
+                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => fmtCurrency(v, currency)} width={65} />
+                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any, name: string) => [fmtCurrency(safeNum(v), currency), name === "revenue" ? "Revenue" : "Spend"]} />
                     <Area type="monotone" dataKey="revenue" stroke="hsl(var(--chart-2))" fill="url(#gRevenue)" strokeWidth={2} dot={false} />
                     <Area type="monotone" dataKey="spend" stroke="hsl(var(--chart-1))" fill="url(#gSpend)" strokeWidth={2} dot={false} />
                   </AreaChart>
@@ -368,9 +371,9 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={platformChartData} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => fmtCurrency(v, currency)} />
                     <YAxis type="category" dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} width={80} />
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`$${safeNum(v).toFixed(2)}`, "Spend"]} />
+                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [fmtCurrency(safeNum(v), currency), "Spend"]} />
                     <Bar dataKey="spend" fill="hsl(var(--chart-3))" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -396,7 +399,7 @@ export default function Dashboard() {
                         <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`$${safeNum(v).toFixed(2)}`, "Spend"]} />
+                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [fmtCurrency(safeNum(v), currency), "Spend"]} />
                     <Legend iconType="circle" iconSize={8} formatter={(v) => <span className="text-xs text-muted-foreground">{v}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
@@ -418,9 +421,9 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={countryChartData} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                    <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => fmtCurrency(v, currency)} />
                     <YAxis type="category" dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} width={30} />
-                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [`$${safeNum(v).toFixed(2)}`, "Spend"]} />
+                    <Tooltip {...TOOLTIP_STYLE} formatter={(v: any) => [fmtCurrency(safeNum(v), currency), "Spend"]} />
                     <Bar dataKey="spend" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
