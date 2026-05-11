@@ -1,0 +1,217 @@
+Fix the Meta Ads data fetching and dashboard refresh system.
+
+Current issue:
+
+* Meta token connection works correctly
+* User accounts are loading correctly
+* Ad accounts dropdown works correctly
+* But when selecting an ad account, NO analytics data appears in the dashboard
+
+I need you to fully debug and fix the entire analytics data layer.
+
+---
+
+## MAIN FIXES REQUIRED
+
+1. FIX META INSIGHTS FETCHING
+
+The dashboard must correctly fetch insights from:
+
+/act_{ad_account_id}/insights
+
+Use proper fields including:
+
+* impressions
+* reach
+* spend
+* clicks
+* ctr
+* cpc
+* cpm
+* frequency
+* actions
+* conversions
+* purchase_roas
+* cost_per_action_type
+* outbound_clicks
+* unique_clicks
+
+Use:
+
+* time_range
+* level
+* breakdowns
+* action_breakdowns
+* filtering
+
+Correctly parse nested Meta responses.
+
+---
+
+2. FIX AD ACCOUNT ID FORMAT
+
+Make sure the selected account ID is properly formatted.
+
+Meta requires:
+act_{id}
+
+Example:
+act_123456789
+
+Many dashboard requests are probably failing because the prefix is missing.
+
+Normalize all IDs before API requests.
+
+---
+
+3. FIX REACT QUERY + STATE MANAGEMENT
+
+Currently changing the ad account does not refresh data properly.
+
+Fix:
+
+* query keys
+* dependency tracking
+* selected account state
+* loading states
+* stale cache issues
+
+Every time:
+
+* ad account changes
+* date range changes
+
+ALL analytics must refetch instantly.
+
+---
+
+4. ADD GLOBAL DATE PRESETS
+
+Build a professional global date range system.
+
+Add preset buttons:
+
+* Today
+* Yesterday
+* Last 7 Days
+* Last 30 Days
+* This Month
+* Last Month
+* Maximum
+* Custom
+
+Requirements:
+
+* Sticky top filter bar
+* Beautiful modern UI
+* Active preset highlighting
+* Smooth animations
+* Instant dashboard refresh
+
+Maximum should:
+
+* automatically fetch the maximum available account history
+
+Custom should:
+
+* open a calendar range picker
+
+---
+
+5. FIX EMPTY DASHBOARD STATES
+
+If no data exists:
+
+* show beautiful empty state
+* explain why
+* show API error details
+* show retry button
+
+DO NOT show blank charts.
+
+---
+
+6. ADD DEBUG PANEL
+
+Create developer debug mode.
+
+Show:
+
+* current selected account
+* request URLs
+* Meta API response
+* request errors
+* rate limit warnings
+
+This is critical for debugging Meta API issues.
+
+---
+
+7. FIX METRICS PARSING
+
+Correctly calculate:
+
+* ROAS
+* CPA
+* Conversion Rate
+* CPC
+* CPM
+* CTR
+
+Handle:
+
+* undefined values
+* null responses
+* empty arrays
+
+Never show NaN.
+
+---
+
+8. FIX CHART DATA TRANSFORMATION
+
+Transform Meta insights into chart-ready data.
+
+Create:
+
+* daily trend arrays
+* spend trends
+* roas trends
+* ctr trends
+* conversion trends
+
+Charts must render correctly even with partial data.
+
+---
+
+9. ADD LOADING UX
+
+Add:
+
+* skeleton loaders
+* shimmer cards
+* loading charts
+* transition animations
+
+The dashboard should feel premium and realtime.
+
+---
+
+10. IMPORTANT
+
+Do NOT rewrite the whole project.
+
+ONLY:
+
+* debug
+* repair
+* optimize
+* improve the existing architecture
+
+Preserve:
+
+* current design system
+* existing components
+* current folder structure
+
+Focus on making the dashboard fully functional and production-ready.

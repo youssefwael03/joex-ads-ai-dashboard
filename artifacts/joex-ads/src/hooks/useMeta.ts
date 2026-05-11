@@ -6,7 +6,8 @@ export const useMe = (enabled: boolean) =>
     queryKey: ["meta", "me"],
     queryFn: () => metaApi.getMe(),
     enabled,
-    retry: false,
+    retry: 1,
+    staleTime: 5 * 60 * 1000,
   });
 
 export const useAdAccounts = (enabled: boolean) =>
@@ -14,6 +15,7 @@ export const useAdAccounts = (enabled: boolean) =>
     queryKey: ["meta", "ad-accounts"],
     queryFn: () => metaApi.getAdAccounts(),
     enabled,
+    staleTime: 10 * 60 * 1000,
   });
 
 export const useInsights = (accountId: string | null, since: string, until: string) =>
@@ -21,6 +23,7 @@ export const useInsights = (accountId: string | null, since: string, until: stri
     queryKey: ["meta", "insights", accountId, since, until],
     queryFn: () => metaApi.getInsights(accountId!, since, until),
     enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
   });
 
 export const useInsightsDaily = (accountId: string | null, since: string, until: string) =>
@@ -28,13 +31,20 @@ export const useInsightsDaily = (accountId: string | null, since: string, until:
     queryKey: ["meta", "insights-daily", accountId, since, until],
     queryFn: () => metaApi.getInsightsDaily(accountId!, since, until),
     enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
   });
 
-export const useInsightsBreakdown = (accountId: string | null, breakdown: string, since: string, until: string) =>
+export const useInsightsBreakdown = (
+  accountId: string | null,
+  breakdown: string,
+  since: string,
+  until: string,
+) =>
   useQuery({
     queryKey: ["meta", "insights-breakdown", accountId, breakdown, since, until],
     queryFn: () => metaApi.getInsightsBreakdown(accountId!, breakdown, since, until),
     enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
   });
 
 export const useCampaigns = (accountId: string | null, since: string, until: string) =>
@@ -42,18 +52,21 @@ export const useCampaigns = (accountId: string | null, since: string, until: str
     queryKey: ["meta", "campaigns", accountId, since, until],
     queryFn: () => metaApi.getCampaigns(accountId!, since, until),
     enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
   });
 
-export const useAdSets = (accountId: string | null) =>
+export const useAdSets = (accountId: string | null, since: string, until: string) =>
   useQuery({
-    queryKey: ["meta", "adsets", accountId],
-    queryFn: () => metaApi.getAdSets(accountId!),
+    queryKey: ["meta", "adsets", accountId, since, until],
+    queryFn: () => metaApi.getAdSets(accountId!, since, until),
     enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
   });
 
-export const useAds = (accountId: string | null) =>
+export const useAds = (accountId: string | null, since: string, until: string) =>
   useQuery({
-    queryKey: ["meta", "ads", accountId],
-    queryFn: () => metaApi.getAds(accountId!),
+    queryKey: ["meta", "ads", accountId, since, until],
+    queryFn: () => metaApi.getAds(accountId!, since, until),
     enabled: !!accountId,
+    staleTime: 2 * 60 * 1000,
   });
