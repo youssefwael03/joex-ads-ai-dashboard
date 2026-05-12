@@ -314,10 +314,23 @@ async function executeTool(
 
       case "get_campaigns": {
         // CORRECT: insights.time_range({...}){fields} or insights.date_preset(last_30d){fields}
-        const data = await metaGet(`/act_${accountId}/campaigns`, token, {
+        const raw = await metaGet(`/act_${accountId}/campaigns`, token, {
           fields: `id,name,status,objective,daily_budget,lifetime_budget,budget_remaining,insights${dp}{${INSIGHT_FIELDS}}`,
           limit: "100",
         });
+        // Meta returns daily_budget / lifetime_budget / budget_remaining in CENTS (smallest unit).
+        // Convert to full currency units so the AI reports correct amounts.
+        const data = raw?.data
+          ? {
+              ...raw,
+              data: raw.data.map((c: any) => ({
+                ...c,
+                daily_budget: c.daily_budget != null ? (Number(c.daily_budget) / 100).toFixed(2) : undefined,
+                lifetime_budget: c.lifetime_budget != null ? (Number(c.lifetime_budget) / 100).toFixed(2) : undefined,
+                budget_remaining: c.budget_remaining != null ? (Number(c.budget_remaining) / 100).toFixed(2) : undefined,
+              })),
+            }
+          : raw;
         return { success: true, data };
       }
 
@@ -325,10 +338,20 @@ async function executeTool(
         const base = input.campaign_id
           ? `/${String(input.campaign_id)}/adsets`
           : `/act_${accountId}/adsets`;
-        const data = await metaGet(base, token, {
+        const rawAdsets = await metaGet(base, token, {
           fields: `id,name,status,campaign_id,daily_budget,lifetime_budget,optimization_goal,insights${dp}{${INSIGHT_FIELDS}}`,
           limit: "100",
         });
+        const data = rawAdsets?.data
+          ? {
+              ...rawAdsets,
+              data: rawAdsets.data.map((a: any) => ({
+                ...a,
+                daily_budget: a.daily_budget != null ? (Number(a.daily_budget) / 100).toFixed(2) : undefined,
+                lifetime_budget: a.lifetime_budget != null ? (Number(a.lifetime_budget) / 100).toFixed(2) : undefined,
+              })),
+            }
+          : rawAdsets;
         return { success: true, data };
       }
 
@@ -371,9 +394,20 @@ async function executeTool(
       }
 
       case "get_account_info": {
-        const data = await metaGet(`/act_${accountId}`, token, {
+        const rawInfo = await metaGet(`/act_${accountId}`, token, {
           fields: "id,name,currency,balance,spend_cap,amount_spent,account_status,business,min_daily_budget,timezone_name",
         });
+        // Meta returns balance, spend_cap, amount_spent, min_daily_budget in CENTS.
+        // Convert all to full currency units.
+        const data = rawInfo && !rawInfo.error
+          ? {
+              ...rawInfo,
+              balance: rawInfo.balance != null ? (Number(rawInfo.balance) / 100).toFixed(2) : undefined,
+              spend_cap: rawInfo.spend_cap != null && Number(rawInfo.spend_cap) > 0 ? (Number(rawInfo.spend_cap) / 100).toFixed(2) : rawInfo.spend_cap,
+              amount_spent: rawInfo.amount_spent != null ? (Number(rawInfo.amount_spent) / 100).toFixed(2) : undefined,
+              min_daily_budget: rawInfo.min_daily_budget != null ? (Number(rawInfo.min_daily_budget) / 100).toFixed(2) : undefined,
+            }
+          : rawInfo;
         return { success: true, data };
       }
 
@@ -496,6 +530,11 @@ YOUR CAPABILITIES:
    - set_campaign_budget → update daily budget (in ${currency})
    - pause_adset / enable_adset → toggle ad set status
    - set_adset_budget → update ad set daily budget
+
+CURRENCY & BUDGET UNITS — CRITICAL:
+- The tool results for campaigns and ad sets have already been converted: daily_budget, lifetime_budget, budget_remaining, balance, amount_spent are given to you in FULL ${currency} units (e.g. "1000.00" means 1,000 ${currency}). Do NOT divide these again.
+- insights fields (spend, cpm, cpc, etc.) are always in full ${currency} units.
+- When you call set_campaign_budget or set_adset_budget, the user tells you a value like "1000 EGP" — pass exactly 1000 (in full currency units). The server converts to cents internally.
 
 RULES:
 - ALWAYS call tools to get live data before making recommendations

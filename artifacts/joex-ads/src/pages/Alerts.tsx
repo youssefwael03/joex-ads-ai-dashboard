@@ -283,17 +283,19 @@ export default function Alerts() {
   const warningCount = alerts.filter((a) => a.severity === "Warning").length;
 
   const accountInfo = accountInfoData as any;
-  const balanceRaw = safeNum(accountInfo?.balance);
+  // Meta returns balance in the smallest currency unit (cents/piasters). Divide by 100 for real amount.
+  const balanceRaw = accountInfo != null ? safeNum(accountInfo?.balance) / 100 : null;
+  const noFunds = balanceRaw !== null && balanceRaw <= 0;
   const totalSpend = safeNum(insights?.spend);
   const dateFrom = new Date(since);
   const dateTo = new Date(until);
   const periodDays = Math.max(1, Math.ceil((dateTo.getTime() - dateFrom.getTime()) / 86400000));
   const dailySpendAvg = periodDays > 0 ? totalSpend / periodDays : 0;
-  const daysRemaining = dailySpendAvg > 0 ? balanceRaw / dailySpendAvg : null;
+  const daysRemaining = !noFunds && balanceRaw !== null && dailySpendAvg > 0 ? balanceRaw / dailySpendAvg : null;
   const isEgpAccount = currency === "EGP";
   const balanceLowThreshold = isEgpAccount ? 2000 : 100;
   const balanceCriticalThreshold = isEgpAccount ? 500 : 20;
-  const hasBalance = balanceRaw > 0;
+  const showBalanceCard = !accountInfoLoading && balanceRaw !== null;
 
   return (
     <div className="space-y-6 pb-10">
@@ -321,55 +323,50 @@ export default function Alerts() {
         )}
       </div>
 
-      {/* Balance Forecast Card */}
-      {!accountInfoLoading && hasBalance && (
-        <Card className={`border-l-4 ${
-          daysRemaining !== null && daysRemaining < 1 ? "border-l-destructive bg-destructive/5" :
-          daysRemaining !== null && daysRemaining < 2 ? "border-l-yellow-500 bg-yellow-500/5" :
-          balanceRaw < balanceCriticalThreshold ? "border-l-destructive bg-destructive/5" :
-          balanceRaw < balanceLowThreshold ? "border-l-yellow-500 bg-yellow-500/5" :
-          "border-l-green-500 bg-card/40"
-        } border-card-border`}>
-          <CardContent className="p-5">
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div className="flex items-start gap-3">
-                <Wallet className={`h-5 w-5 mt-0.5 shrink-0 ${
-                  balanceRaw < balanceCriticalThreshold || (daysRemaining !== null && daysRemaining < 1) ? "text-destructive" :
-                  balanceRaw < balanceLowThreshold || (daysRemaining !== null && daysRemaining < 2) ? "text-yellow-400" :
-                  "text-green-400"
-                }`} />
-                <div>
-                  <div className="font-medium text-sm text-foreground">Account Balance Monitor</div>
-                  <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-                    <div>Current balance: <span className="font-mono font-semibold text-foreground">{fmtCurrency(balanceRaw, currency)}</span></div>
-                    {dailySpendAvg > 0 && (
-                      <div>Avg daily spend (period): <span className="font-mono text-foreground">{fmtCurrency(dailySpendAvg, currency)}/day</span></div>
-                    )}
-                    {daysRemaining !== null && (
-                      <div className={`font-medium ${daysRemaining < 2 ? "text-destructive" : daysRemaining < 5 ? "text-yellow-400" : "text-green-400"}`}>
-                        {daysRemaining < 1
-                          ? "Balance may be insufficient to run ads today."
-                          : `Estimated ${daysRemaining.toFixed(1)} days of ads remaining at current spend pace.`}
-                      </div>
-                    )}
-                    {isEgpAccount && balanceRaw < balanceLowThreshold && (
-                      <div className="text-yellow-400 font-medium">Balance below {fmtCurrency(balanceLowThreshold, currency)} — Egyptian market low-balance threshold.</div>
-                    )}
+      {/* Balance Forecast Card — always shown when account info is loaded */}
+      {showBalanceCard && (() => {
+        const b = balanceRaw!;
+        const isCritical = noFunds || b < balanceCriticalThreshold || (daysRemaining !== null && daysRemaining < 1);
+        const isWarning = !isCritical && (b < balanceLowThreshold || (daysRemaining !== null && daysRemaining < 2));
+        const borderColor = isCritical ? "border-l-destructive bg-destructive/5" : isWarning ? "border-l-yellow-500 bg-yellow-500/5" : "border-l-green-500 bg-card/40";
+        const iconColor = isCritical ? "text-destructive" : isWarning ? "text-yellow-400" : "text-green-400";
+        const badgeColor = isCritical ? "border-destructive/50 bg-destructive/10 text-destructive" : isWarning ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-400" : "border-green-500/50 bg-green-500/10 text-green-400";
+        const badgeLabel = isCritical ? "Critical" : isWarning ? "Warning" : "OK";
+        return (
+          <Card className={`border-l-4 ${borderColor} border-card-border`}>
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex items-start gap-3">
+                  <Wallet className={`h-5 w-5 mt-0.5 shrink-0 ${iconColor}`} />
+                  <div>
+                    <div className="font-medium text-sm text-foreground">Account Balance Monitor</div>
+                    <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                      <div>Current balance: <span className={`font-mono font-semibold ${noFunds ? "text-destructive" : "text-foreground"}`}>{fmtCurrency(b, currency)}</span></div>
+                      {noFunds && (
+                        <div className="text-destructive font-semibold">No funds — ads may be paused or stopped. Top up your account immediately.</div>
+                      )}
+                      {!noFunds && dailySpendAvg > 0 && (
+                        <div>Avg daily spend (period): <span className="font-mono text-foreground">{fmtCurrency(dailySpendAvg, currency)}/day</span></div>
+                      )}
+                      {daysRemaining !== null && (
+                        <div className={`font-medium ${daysRemaining < 2 ? "text-destructive" : daysRemaining < 5 ? "text-yellow-400" : "text-green-400"}`}>
+                          {daysRemaining < 1
+                            ? "Balance may be insufficient to run ads today."
+                            : `Estimated ${daysRemaining.toFixed(1)} days of ads remaining at current spend pace.`}
+                        </div>
+                      )}
+                      {!noFunds && isEgpAccount && b < balanceLowThreshold && (
+                        <div className="text-yellow-400 font-medium">Balance below {fmtCurrency(balanceLowThreshold, currency)} — Egyptian market low-balance threshold.</div>
+                      )}
+                    </div>
                   </div>
                 </div>
+                <Badge variant="outline" className={`shrink-0 ${badgeColor}`}>{badgeLabel}</Badge>
               </div>
-              <Badge variant="outline" className={`shrink-0 ${
-                balanceRaw < balanceCriticalThreshold || (daysRemaining !== null && daysRemaining < 1) ? "border-destructive/50 bg-destructive/10 text-destructive" :
-                balanceRaw < balanceLowThreshold || (daysRemaining !== null && daysRemaining < 2) ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-400" :
-                "border-green-500/50 bg-green-500/10 text-green-400"
-              }`}>
-                {balanceRaw < balanceCriticalThreshold || (daysRemaining !== null && daysRemaining < 1) ? "Critical" :
-                 balanceRaw < balanceLowThreshold || (daysRemaining !== null && daysRemaining < 2) ? "Warning" : "OK"}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isLoading
