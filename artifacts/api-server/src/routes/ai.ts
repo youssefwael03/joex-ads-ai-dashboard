@@ -1,12 +1,21 @@
 import { Router, type IRouter } from "express";
-import { anthropic } from "@workspace/integrations-anthropic-ai";
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 
 const router: IRouter = Router();
 
-const META_BASE = "https://graph.facebook.com/v22.0";
+// ── Anthropic client ──────────────────────────────────────────────────────────
+// Inline the client here so we don't depend on the unbuilt composite lib.
+
+function getAnthropicClient(): Anthropic {
+  const apiKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+  if (!apiKey) throw new Error("AI_INTEGRATIONS_ANTHROPIC_API_KEY is not set");
+  return new Anthropic({ apiKey, ...(baseURL ? { baseURL } : {}) });
+}
 
 // ── Meta API helpers ──────────────────────────────────────────────────────────
+
+const META_BASE = "https://graph.facebook.com/v22.0";
 
 async function metaGet(
   path: string,
@@ -38,10 +47,27 @@ async function metaPost(
   return res.json();
 }
 
-// ── Tool definitions ──────────────────────────────────────────────────────────
+// ── Field helpers ─────────────────────────────────────────────────────────────
 
 const INSIGHT_FIELDS =
   "spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,purchase_roas,cost_per_action_type,unique_clicks,outbound_clicks";
+
+/**
+ * Builds the CORRECT Meta Graph API inline field parameter for nested insights.
+ * Syntax: insights.time_range({"since":"...","until":"..."}){fields}
+ *         OR insights.date_preset(last_30d){fields}
+ *
+ * This is NOT the same as the top-level ?time_range= query param.
+ * Passing time_range as a separate query param does NOT filter nested insights edges.
+ */
+function insightParam(since: string, until: string): string {
+  if (since && until) {
+    return `.time_range(${JSON.stringify({ since, until })})`;
+  }
+  return `.date_preset(last_30d)`;
+}
+
+// ── Tool definitions ──────────────────────────────────────────────────────────
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -87,7 +113,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "get_breakdown",
     description:
-      "Get performance breakdown by a specific dimension to find where spend is going and what's working. Essential for optimization decisions.",
+      "Get performance breakdown by a specific dimension to find where spend is going and what's working. Essential for optimization. Use device_platform, publisher_platform, or country — those are reliably available for all accounts.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -97,11 +123,11 @@ const TOOLS: Anthropic.Tool[] = [
             "device_platform",
             "publisher_platform",
             "country",
+            "impression_device",
             "age",
             "gender",
-            "impression_device",
           ],
-          description: "Dimension to analyze",
+          description: "Dimension to analyze. Prefer device_platform, publisher_platform, country. age/gender may not be available for all accounts.",
         },
       },
       required: ["breakdown"],
@@ -116,7 +142,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "get_account_info",
     description:
-      "Get account balance, spend cap, amount spent to date, account status, and billing info.",
+      "Get account balance, spend cap, amount spent to date, account status, currency, and billing info.",
     input_schema: { type: "object" as const, properties: {} },
   },
   {
@@ -128,10 +154,7 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         campaign_id: { type: "string", description: "Campaign ID to pause" },
         campaign_name: { type: "string", description: "Campaign name for confirmation" },
-        reason: {
-          type: "string",
-          description: "Specific data-backed reason (e.g. 'ROAS 0.6x after $500 spend')",
-        },
+        reason: { type: "string", description: "Specific data-backed reason (e.g. 'ROAS 0.6x after $500 spend')" },
       },
       required: ["campaign_id", "campaign_name", "reason"],
     },
@@ -170,7 +193,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "pause_adset",
     description:
-      "PAUSE an active ad set. Use for ad sets with high ad frequency (>3.5), low CTR, poor ROAS, or audience exhaustion signs.",
+      "PAUSE an active ad set. Use for ad sets with high frequency (>3.5), low CTR, poor ROAS, or audience exhaustion signs.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -224,23 +247,19 @@ const ACTION_TOOLS = new Set([
 function toolCallLabel(name: string, input: Record<string, any>): string {
   switch (name) {
     case "get_account_overview": return "Fetching account performance overview…";
-    case "get_campaigns": return "Loading all campaigns with insights…";
-    case "get_adsets": return input.campaign_id
-      ? `Loading ad sets for campaign ${input.campaign_id}…`
-      : "Loading all ad sets…";
-    case "get_ads": return input.adset_id
-      ? `Loading ads for ad set ${input.adset_id}…`
-      : "Loading all ads…";
-    case "get_breakdown": return `Fetching ${input.breakdown?.replace(/_/g, " ")} breakdown…`;
-    case "get_daily_insights": return "Loading daily performance trends…";
-    case "get_account_info": return "Fetching account balance & info…";
-    case "pause_campaign": return `Pausing campaign: ${input.campaign_name}`;
-    case "enable_campaign": return `Enabling campaign: ${input.campaign_name}`;
-    case "set_campaign_budget": return `Updating budget for: ${input.campaign_name}`;
-    case "pause_adset": return `Pausing ad set: ${input.adset_name}`;
-    case "enable_adset": return `Enabling ad set: ${input.adset_name}`;
-    case "set_adset_budget": return `Updating budget for: ${input.adset_name}`;
-    default: return `Running ${name}…`;
+    case "get_campaigns":        return "Loading all campaigns with insights…";
+    case "get_adsets":           return input.campaign_id ? `Loading ad sets for campaign ${input.campaign_id}…` : "Loading all ad sets…";
+    case "get_ads":              return input.adset_id ? `Loading ads for ad set ${input.adset_id}…` : "Loading all ads…";
+    case "get_breakdown":        return `Fetching ${String(input.breakdown ?? "").replace(/_/g, " ")} breakdown…`;
+    case "get_daily_insights":   return "Loading daily performance trends…";
+    case "get_account_info":     return "Fetching account balance & info…";
+    case "pause_campaign":       return `Pausing campaign: ${input.campaign_name}`;
+    case "enable_campaign":      return `Enabling campaign: ${input.campaign_name}`;
+    case "set_campaign_budget":  return `Updating budget for: ${input.campaign_name}`;
+    case "pause_adset":          return `Pausing ad set: ${input.adset_name}`;
+    case "enable_adset":         return `Enabling ad set: ${input.adset_name}`;
+    case "set_adset_budget":     return `Updating budget for: ${input.adset_name}`;
+    default:                     return `Running ${name}…`;
   }
 }
 
@@ -249,18 +268,18 @@ function toolDoneLabel(name: string, input: Record<string, any>, result: any): s
   const count = result.data?.data?.length;
   switch (name) {
     case "get_account_overview": return "Account overview loaded";
-    case "get_campaigns": return count != null ? `${count} campaigns loaded` : "Campaigns loaded";
-    case "get_adsets": return count != null ? `${count} ad sets loaded` : "Ad sets loaded";
-    case "get_ads": return count != null ? `${count} ads loaded` : "Ads loaded";
-    case "get_breakdown": return `${input.breakdown?.replace(/_/g, " ")} breakdown loaded`;
-    case "get_daily_insights": return count != null ? `${count} days of data loaded` : "Daily data loaded";
-    case "get_account_info": return "Account info loaded";
-    case "pause_campaign": return `Campaign "${input.campaign_name}" paused`;
-    case "enable_campaign": return `Campaign "${input.campaign_name}" enabled`;
-    case "set_campaign_budget": return `Budget set to ${input.daily_budget} for "${input.campaign_name}"`;
-    case "pause_adset": return `Ad set "${input.adset_name}" paused`;
-    case "enable_adset": return `Ad set "${input.adset_name}" enabled`;
-    case "set_adset_budget": return `Budget set to ${input.daily_budget} for "${input.adset_name}"`;
+    case "get_campaigns":        return count != null ? `${count} campaigns loaded` : "Campaigns loaded";
+    case "get_adsets":           return count != null ? `${count} ad sets loaded` : "Ad sets loaded";
+    case "get_ads":              return count != null ? `${count} ads loaded` : "Ads loaded";
+    case "get_breakdown":        return `${String(input.breakdown ?? "").replace(/_/g, " ")} breakdown loaded`;
+    case "get_daily_insights":   return count != null ? `${count} days of data loaded` : "Daily data loaded";
+    case "get_account_info":     return "Account info loaded";
+    case "pause_campaign":       return `Campaign "${input.campaign_name}" paused`;
+    case "enable_campaign":      return `Campaign "${input.campaign_name}" enabled`;
+    case "set_campaign_budget":  return `Budget set to ${input.daily_budget} for "${input.campaign_name}"`;
+    case "pause_adset":          return `Ad set "${input.adset_name}" paused`;
+    case "enable_adset":         return `Ad set "${input.adset_name}" enabled`;
+    case "set_adset_budget":     return `Budget set to ${input.daily_budget} for "${input.adset_name}"`;
     default: return "Done";
   }
 }
@@ -275,25 +294,28 @@ async function executeTool(
   since: string,
   until: string,
 ): Promise<{ success: boolean; data?: any; error?: string }> {
-  const dateParams: Record<string, string> =
-    since && until
-      ? { time_range: JSON.stringify({ since, until }) }
-      : { date_preset: "last_30d" };
+  // For top-level insights endpoint: use query params
+  const dateQueryParams: Record<string, string> = since && until
+    ? { time_range: JSON.stringify({ since, until }) }
+    : { date_preset: "last_30d" };
+
+  // For nested insights in field expansion: use inline dot-param syntax
+  const dp = insightParam(since, until);
 
   try {
     switch (name) {
       case "get_account_overview": {
         const data = await metaGet(`/act_${accountId}/insights`, token, {
           fields: INSIGHT_FIELDS,
-          ...dateParams,
+          ...dateQueryParams,
         });
         return { success: true, data };
       }
 
       case "get_campaigns": {
+        // CORRECT: insights.time_range({...}){fields} or insights.date_preset(last_30d){fields}
         const data = await metaGet(`/act_${accountId}/campaigns`, token, {
-          fields: `id,name,status,objective,daily_budget,lifetime_budget,budget_remaining,insights{${INSIGHT_FIELDS}}`,
-          ...dateParams,
+          fields: `id,name,status,objective,daily_budget,lifetime_budget,budget_remaining,insights${dp}{${INSIGHT_FIELDS}}`,
           limit: "100",
         });
         return { success: true, data };
@@ -301,11 +323,10 @@ async function executeTool(
 
       case "get_adsets": {
         const base = input.campaign_id
-          ? `/${input.campaign_id}/adsets`
+          ? `/${String(input.campaign_id)}/adsets`
           : `/act_${accountId}/adsets`;
         const data = await metaGet(base, token, {
-          fields: `id,name,status,campaign_id,daily_budget,lifetime_budget,insights{${INSIGHT_FIELDS}}`,
-          ...dateParams,
+          fields: `id,name,status,campaign_id,daily_budget,lifetime_budget,optimization_goal,insights${dp}{${INSIGHT_FIELDS}}`,
           limit: "100",
         });
         return { success: true, data };
@@ -313,23 +334,30 @@ async function executeTool(
 
       case "get_ads": {
         const base = input.adset_id
-          ? `/${input.adset_id}/ads`
+          ? `/${String(input.adset_id)}/ads`
           : `/act_${accountId}/ads`;
         const data = await metaGet(base, token, {
-          fields: `id,name,status,adset_id,campaign_id,creative{id,name,body,title,image_url},insights{${INSIGHT_FIELDS}}`,
-          ...dateParams,
+          fields: `id,name,status,adset_id,campaign_id,creative{id,name,body,title,image_url,call_to_action_type},insights${dp}{${INSIGHT_FIELDS}}`,
           limit: "100",
         });
         return { success: true, data };
       }
 
       case "get_breakdown": {
+        const bd = String(input.breakdown ?? "country");
         const data = await metaGet(`/act_${accountId}/insights`, token, {
-          fields: `${INSIGHT_FIELDS},${input.breakdown}`,
-          breakdowns: input.breakdown,
-          ...dateParams,
+          fields: INSIGHT_FIELDS,
+          breakdowns: bd,
+          ...dateQueryParams,
           limit: "50",
         });
+        // If the API returns an error (e.g. age/gender not available), relay it gracefully
+        if ((data as any)?.error) {
+          return {
+            success: false,
+            error: `Meta API error for breakdown "${bd}": ${(data as any).error.message ?? JSON.stringify((data as any).error)}. Try a different breakdown dimension like device_platform or country.`,
+          };
+        }
         return { success: true, data };
       }
 
@@ -337,53 +365,53 @@ async function executeTool(
         const data = await metaGet(`/act_${accountId}/insights`, token, {
           fields: INSIGHT_FIELDS,
           time_increment: "1",
-          ...dateParams,
+          ...dateQueryParams,
         });
         return { success: true, data };
       }
 
       case "get_account_info": {
         const data = await metaGet(`/act_${accountId}`, token, {
-          fields: "id,name,currency,balance,spend_cap,amount_spent,account_status,business,min_daily_budget",
+          fields: "id,name,currency,balance,spend_cap,amount_spent,account_status,business,min_daily_budget,timezone_name",
         });
         return { success: true, data };
       }
 
       case "pause_campaign": {
-        const data = await metaPost(`/${input.campaign_id}`, token, { status: "PAUSED" });
-        if (data.error) return { success: false, error: data.error.message ?? JSON.stringify(data.error) };
+        const data = await metaPost(`/${String(input.campaign_id)}`, token, { status: "PAUSED" });
+        if ((data as any).error) return { success: false, error: (data as any).error.message ?? JSON.stringify((data as any).error) };
         return { success: true, data: { message: `Campaign "${input.campaign_name}" paused successfully`, id: input.campaign_id } };
       }
 
       case "enable_campaign": {
-        const data = await metaPost(`/${input.campaign_id}`, token, { status: "ACTIVE" });
-        if (data.error) return { success: false, error: data.error.message ?? JSON.stringify(data.error) };
+        const data = await metaPost(`/${String(input.campaign_id)}`, token, { status: "ACTIVE" });
+        if ((data as any).error) return { success: false, error: (data as any).error.message ?? JSON.stringify((data as any).error) };
         return { success: true, data: { message: `Campaign "${input.campaign_name}" enabled`, id: input.campaign_id } };
       }
 
       case "set_campaign_budget": {
         const budgetCents = String(Math.round(Number(input.daily_budget) * 100));
-        const data = await metaPost(`/${input.campaign_id}`, token, { daily_budget: budgetCents });
-        if (data.error) return { success: false, error: data.error.message ?? JSON.stringify(data.error) };
+        const data = await metaPost(`/${String(input.campaign_id)}`, token, { daily_budget: budgetCents });
+        if ((data as any).error) return { success: false, error: (data as any).error.message ?? JSON.stringify((data as any).error) };
         return { success: true, data: { message: `Daily budget set to ${input.daily_budget} for "${input.campaign_name}"`, id: input.campaign_id } };
       }
 
       case "pause_adset": {
-        const data = await metaPost(`/${input.adset_id}`, token, { status: "PAUSED" });
-        if (data.error) return { success: false, error: data.error.message ?? JSON.stringify(data.error) };
+        const data = await metaPost(`/${String(input.adset_id)}`, token, { status: "PAUSED" });
+        if ((data as any).error) return { success: false, error: (data as any).error.message ?? JSON.stringify((data as any).error) };
         return { success: true, data: { message: `Ad set "${input.adset_name}" paused`, id: input.adset_id } };
       }
 
       case "enable_adset": {
-        const data = await metaPost(`/${input.adset_id}`, token, { status: "ACTIVE" });
-        if (data.error) return { success: false, error: data.error.message ?? JSON.stringify(data.error) };
+        const data = await metaPost(`/${String(input.adset_id)}`, token, { status: "ACTIVE" });
+        if ((data as any).error) return { success: false, error: (data as any).error.message ?? JSON.stringify((data as any).error) };
         return { success: true, data: { message: `Ad set "${input.adset_name}" enabled`, id: input.adset_id } };
       }
 
       case "set_adset_budget": {
         const budgetCents = String(Math.round(Number(input.daily_budget) * 100));
-        const data = await metaPost(`/${input.adset_id}`, token, { daily_budget: budgetCents });
-        if (data.error) return { success: false, error: data.error.message ?? JSON.stringify(data.error) };
+        const data = await metaPost(`/${String(input.adset_id)}`, token, { daily_budget: budgetCents });
+        if ((data as any).error) return { success: false, error: (data as any).error.message ?? JSON.stringify((data as any).error) };
         return { success: true, data: { message: `Daily budget set to ${input.daily_budget} for "${input.adset_name}"`, id: input.adset_id } };
       }
 
@@ -410,7 +438,7 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
   const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
 
   if (!token) {
-    res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized — missing X-Meta-Token" });
     return;
   }
 
@@ -438,6 +466,14 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
   const currency = context?.currency ?? "USD";
   const accountName = context?.accountName ?? "this account";
 
+  let anthropic: Anthropic;
+  try {
+    anthropic = getAnthropicClient();
+  } catch (err: any) {
+    res.status(503).json({ error: `AI not configured: ${err?.message}` });
+    return;
+  }
+
   const systemPrompt = `You are JOEX AI — an elite Meta Ads AI agent with FULL LIVE ACCESS to the ad account data and the ability to execute real actions.
 
 ACCOUNT:
@@ -451,9 +487,9 @@ YOUR CAPABILITIES:
    - get_campaigns → all campaigns with full performance metrics
    - get_adsets → all ad sets with budgets, ROAS, frequency
    - get_ads → all ads with creative info and performance
-   - get_breakdown → performance by device, platform, country, age, gender
+   - get_breakdown → performance by device_platform, publisher_platform, country, impression_device (prefer these; age/gender may not be available for all accounts)
    - get_daily_insights → day-by-day trends
-   - get_account_info → balance, billing, account status
+   - get_account_info → balance, billing, account status, currency
 
 2. ACTION TOOLS — execute real changes on the Meta account:
    - pause_campaign / enable_campaign → toggle campaign status
@@ -464,12 +500,13 @@ YOUR CAPABILITIES:
 RULES:
 - ALWAYS call tools to get live data before making recommendations
 - For optimization requests: fetch campaigns AND adsets AND relevant breakdowns
-- Reference actual names, IDs, and numbers from the data
+- Reference actual names, IDs, and numbers from the data — no generic advice
 - For actions: state exactly what you did and why with specific metrics
 - Prioritize by revenue impact (highest ROI first)
-- Be direct and specific — no generic advice
-- If asked to "analyze everything" or "full audit": call get_account_overview, get_campaigns, get_adsets, get_daily_insights
-- When taking actions, confirm each action with the specific metric that justified it`;
+- If a breakdown fails (age/gender not available), note it and try device or country instead
+- If asked to "analyze everything" or "full audit": call get_account_overview + get_campaigns + get_adsets + get_daily_insights
+- When taking actions, confirm each action with the specific metric that justified it
+- Format currency amounts with the account currency (${currency})`;
 
   // SSE setup
   res.setHeader("Content-Type", "text/event-stream");
@@ -481,7 +518,7 @@ RULES:
     try {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     } catch {
-      // ignore write errors (client disconnected)
+      // ignore write errors — client disconnected
     }
   };
 
@@ -493,29 +530,27 @@ RULES:
 
     const tools = accountId ? TOOLS : [];
 
-    // Agentic loop — max 12 iterations
+    // Agentic loop — max 12 tool-calling iterations
     for (let iter = 0; iter < 12; iter++) {
       const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-5",
         max_tokens: 8192,
         system: systemPrompt,
         tools,
         messages: currentMessages,
       });
 
-      // Stream any text blocks character-by-character for smooth output
+      // Stream any text blocks in small chunks for a smooth typing effect
       for (const block of response.content) {
         if (block.type === "text" && block.text) {
-          const chunkSize = 4;
+          const chunkSize = 6;
           for (let i = 0; i < block.text.length; i += chunkSize) {
             emit({ content: block.text.slice(i, i + chunkSize) });
           }
         }
       }
 
-      if (response.stop_reason === "end_turn") {
-        break;
-      }
+      if (response.stop_reason === "end_turn") break;
 
       if (response.stop_reason === "tool_use") {
         const toolUseBlocks = response.content.filter(
