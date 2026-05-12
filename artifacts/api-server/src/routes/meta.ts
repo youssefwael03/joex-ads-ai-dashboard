@@ -122,7 +122,7 @@ router.get("/meta/account-info", async (req, res): Promise<void> => {
   const accountId = normalizeAccountId(rawId);
 
   const { data, status } = await metaFetch(`/act_${accountId}`, token, {
-    fields: "id,name,currency,balance,spend_cap,amount_spent,account_status,business,timezone_name,min_daily_budget",
+    fields: "id,name,currency,balance,spend_cap,amount_spent,account_status,business,timezone_name,min_daily_budget,funding_source_details",
   });
   res.status(status).json(data);
 });

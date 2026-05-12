@@ -283,8 +283,18 @@ export default function Alerts() {
   const warningCount = alerts.filter((a) => a.severity === "Warning").length;
 
   const accountInfo = accountInfoData as any;
-  // Meta returns balance in the smallest currency unit (cents/piasters). Divide by 100 for real amount.
-  const balanceRaw = accountInfo != null ? safeNum(accountInfo?.balance) / 100 : null;
+  // Meta balance resolution (priority order):
+  // 1. funding_source_details.value — already in major currency unit (e.g. 1469.13 EGP), most accurate
+  // 2. balance field — in smallest unit (piasters/cents), divide by 100, but may be partial/missing
+  function resolveBalance(info: any): number | null {
+    if (info == null) return null;
+    const fsdValue = safeNum(info?.funding_source_details?.value);
+    if (fsdValue > 0) return fsdValue;
+    const bal = safeNum(info?.balance);
+    if (bal > 0) return bal / 100;
+    return 0;
+  }
+  const balanceRaw = resolveBalance(accountInfo);
   const noFunds = balanceRaw !== null && balanceRaw <= 0;
   const totalSpend = safeNum(insights?.spend);
   const dateFrom = new Date(since);
