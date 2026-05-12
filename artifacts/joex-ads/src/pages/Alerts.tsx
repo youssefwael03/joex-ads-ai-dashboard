@@ -12,8 +12,7 @@ import {
 import { safeNum, getPurchaseRoas, getAction, fmtCurrency } from "@/lib/metaApi";
 import { motion } from "framer-motion";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  RadialBarChart, RadialBar, Cell,
+  ResponsiveContainer, RadialBarChart, RadialBar, Cell,
 } from "recharts";
 
 // ── Market benchmarks ─────────────────────────────────────────────────────────
@@ -279,23 +278,6 @@ export default function Alerts() {
     .filter(Boolean)
     .sort((a: any, b: any) => b.spend - a.spend) as any[];
 
-  // ── ROAS chart data ─────────────────────────────────────────────────────────
-  const roasChartData = activeCampaigns
-    .map((c: any) => {
-      const ci = c.insights?.data?.[0] ?? {};
-      const r = getPurchaseRoas(ci.purchase_roas);
-      const s = safeNum(ci.spend);
-      if (s <= 0) return null;
-      return {
-        name: c.name?.length > 22 ? c.name.slice(0, 22) + "…" : c.name,
-        ROAS: parseFloat(r.toFixed(2)),
-        Spend: parseFloat(s.toFixed(2)),
-      };
-    })
-    .filter(Boolean)
-    .sort((a: any, b: any) => b.ROAS - a.ROAS)
-    .slice(0, 8) as any[];
-
   // ── Health score ────────────────────────────────────────────────────────────
   const totalAlerts = criticalCount + warningCount + okCount;
   const healthScore = totalAlerts > 0 ? Math.round(((okCount + warningCount * 0.5) / totalAlerts) * 100) : 100;
@@ -504,65 +486,6 @@ export default function Alerts() {
             })}
           </CardContent>
         </Card>
-      )}
-
-      {/* ── Charts row ── */}
-      {!isLoading && roasChartData.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* ROAS by campaign */}
-          <Card className="bg-card/40 border-card-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                ROAS by Active Campaign
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={roasChartData} layout="vertical" margin={{ left: 0, right: 24, top: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "#888" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}x`} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#aaa" }} axisLine={false} tickLine={false} width={110} />
-                  <Tooltip content={<ChartTooltip currency={currency} isRoas />} />
-                  <Bar dataKey="ROAS" radius={[0, 4, 4, 0]} maxBarSize={16}>
-                    {roasChartData.map((entry: any) => (
-                      <Cell
-                        key={entry.name}
-                        fill={entry.ROAS >= bm.roasMinProfit ? "#22c55e" : entry.ROAS >= 1 ? "#eab308" : "#ef4444"}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="flex items-center gap-4 mt-2 justify-center text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-green-500 inline-block" />≥ {bm.roasMinProfit}x</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-yellow-500 inline-block" />1–{bm.roasMinProfit}x</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-destructive inline-block" />Below 1x</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Spend by campaign */}
-          <Card className="bg-card/40 border-card-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-primary" />
-                Spend Distribution — Active Campaigns
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={roasChartData} layout="vertical" margin={{ left: 0, right: 24, top: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "#888" }} axisLine={false} tickLine={false} tickFormatter={(v) => fmt(v)} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#aaa" }} axisLine={false} tickLine={false} width={110} />
-                  <Tooltip content={<ChartTooltip currency={currency} />} />
-                  <Bar dataKey="Spend" radius={[0, 4, 4, 0]} maxBarSize={16} fill="hsl(var(--primary) / 0.7)" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
       )}
 
       {/* ── Campaign health table ── */}
