@@ -191,6 +191,41 @@ const TOOLS: AnthropicTool[] = [
       required: ["campaign_id", "campaign_name", "reason"],
     },
   },
+  {
+    name: "duplicate_campaign",
+    description:
+      "Duplicate an existing campaign. Creates an exact copy with all ad sets and ads. Useful for A/B testing or scaling a winner.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        campaign_id: { type: "string", description: "Campaign ID to duplicate" },
+        campaign_name: { type: "string", description: "Original campaign name (for display)" },
+        copies: { type: "number", description: "Number of copies to create (default 1)" },
+        status_override: {
+          type: "string",
+          enum: ["ACTIVE", "PAUSED", "INHERITED_FROM_SOURCE"],
+          description: "Status for the copies (default PAUSED)",
+        },
+      },
+      required: ["campaign_id", "campaign_name"],
+    },
+  },
+  {
+    name: "set_spend_cap",
+    description:
+      "Set or update the account-level spend cap. Prevents overspend by capping total account spend at a given amount. Set to 0 to remove the cap.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        spend_cap: {
+          type: "number",
+          description: "Maximum total spend in account currency. Set to 0 to remove the cap.",
+        },
+        reason: { type: "string", description: "Why this cap is being set/changed" },
+      },
+      required: ["spend_cap", "reason"],
+    },
+  },
 
   // ── AD SETS ──────────────────────────────────────────────────────────────────
 
@@ -408,6 +443,25 @@ const TOOLS: AnthropicTool[] = [
     description:
       "Get all custom audiences for the account: customer lists, website visitors, lookalikes, engagement audiences.",
     input_schema: { type: "object" as const, properties: {} },
+  },
+  {
+    name: "create_lookalike",
+    description:
+      "Create a Lookalike Audience from an existing source audience (custom audience, pixel, page fans). Specify country and lookalike ratio (1%–10% — 1% is most similar).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", description: "Name for the lookalike audience" },
+        origin_audience_id: { type: "string", description: "Source custom audience ID to base the lookalike on" },
+        country: { type: "string", description: "Two-letter country code (e.g. US, GB, AE)" },
+        ratio: {
+          type: "number",
+          description: "Lookalike ratio 0.01–0.10 (1%–10%). 0.01 = most similar, 0.10 = broadest reach.",
+        },
+        description: { type: "string", description: "Optional description" },
+      },
+      required: ["name", "origin_audience_id", "country", "ratio"],
+    },
   },
   {
     name: "create_customaudience",
@@ -684,10 +738,11 @@ const TOOLS: AnthropicTool[] = [
 
 const ACTION_TOOLS = new Set([
   "create_campaign", "pause_campaign", "enable_campaign", "set_campaign_budget", "delete_campaign",
+  "duplicate_campaign", "set_spend_cap",
   "create_adset", "pause_adset", "enable_adset", "set_adset_budget", "delete_adset",
   "create_ad", "pause_ad", "enable_ad", "delete_ad",
   "create_adcreative", "delete_adcreative",
-  "create_customaudience", "delete_customaudience",
+  "create_lookalike", "create_customaudience", "delete_customaudience",
   "upload_adimage_by_url", "delete_adimage",
   "delete_advideo",
   "create_adspixel",
@@ -710,6 +765,8 @@ function toolCallLabel(name: string, input: Record<string, any>): string {
     enable_campaign:         () => `Enabling campaign: ${input.campaign_name}`,
     set_campaign_budget:     () => `Updating budget for: ${input.campaign_name}`,
     delete_campaign:         () => `Deleting campaign: ${input.campaign_name}`,
+    duplicate_campaign:      () => `Duplicating campaign: ${input.campaign_name}`,
+    set_spend_cap:           () => `Setting account spend cap to ${input.spend_cap}…`,
     get_adsets:              () => input.campaign_id ? `Loading ad sets for campaign ${input.campaign_id}…` : "Loading all ad sets…",
     create_adset:            () => `Creating ad set: ${input.name}`,
     pause_adset:             () => `Pausing ad set: ${input.adset_name}`,
@@ -725,6 +782,7 @@ function toolCallLabel(name: string, input: Record<string, any>): string {
     create_adcreative:       () => `Creating creative: ${input.name}`,
     delete_adcreative:       () => `Deleting creative: ${input.creative_name}`,
     get_customaudiences:     () => "Loading all custom audiences…",
+    create_lookalike:        () => `Creating lookalike audience: ${input.name}`,
     create_customaudience:   () => `Creating audience: ${input.name}`,
     delete_customaudience:   () => `Deleting audience: ${input.audience_name}`,
     get_adimages:            () => "Loading all ad images…",
@@ -764,6 +822,8 @@ function toolDoneLabel(name: string, input: Record<string, any>, result: ToolRes
     enable_campaign:         () => `Campaign "${input.campaign_name}" enabled`,
     set_campaign_budget:     () => `Budget → ${input.daily_budget} for "${input.campaign_name}"`,
     delete_campaign:         () => `Campaign "${input.campaign_name}" deleted`,
+    duplicate_campaign:      () => `Campaign "${input.campaign_name}" duplicated`,
+    set_spend_cap:           () => input.spend_cap === 0 ? "Spend cap removed" : `Spend cap set to ${input.spend_cap}`,
     get_adsets:              () => count != null ? `${count} ad sets loaded` : "Ad sets loaded",
     create_adset:            () => `Ad set "${input.name}" created`,
     pause_adset:             () => `Ad set "${input.adset_name}" paused`,
@@ -779,6 +839,7 @@ function toolDoneLabel(name: string, input: Record<string, any>, result: ToolRes
     create_adcreative:       () => `Creative "${input.name}" created`,
     delete_adcreative:       () => `Creative "${input.creative_name}" deleted`,
     get_customaudiences:     () => count != null ? `${count} audiences loaded` : "Audiences loaded",
+    create_lookalike:        () => `Lookalike audience "${input.name}" created`,
     create_customaudience:   () => `Audience "${input.name}" created`,
     delete_customaudience:   () => `Audience "${input.audience_name}" deleted`,
     get_adimages:            () => count != null ? `${count} images loaded` : "Images loaded",
@@ -912,6 +973,25 @@ async function executeTool(
         const data = await metaDelete(`/${input.campaign_id}`, token);
         if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
         return { success: true, data: { message: `Deleted: ${input.campaign_name}` } };
+      }
+
+      case "duplicate_campaign": {
+        const body: Record<string, any> = {
+          copies: String(input.copies ?? 1),
+          status_override: input.status_override ?? "PAUSED",
+        };
+        const data = await metaPost(`/${input.campaign_id}/copies`, token, body);
+        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        return { success: true, data };
+      }
+
+      case "set_spend_cap": {
+        const capValue = Number(input.spend_cap) === 0
+          ? "0"
+          : String(Math.round(Number(input.spend_cap) * 100));
+        const data = await metaPost(`/act_${accountId}`, token, { spend_cap: capValue });
+        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        return { success: true, data: { message: Number(input.spend_cap) === 0 ? "Spend cap removed" : `Spend cap set to ${input.spend_cap}` } };
       }
 
       // ── AD SETS ────────────────────────────────────────────────────────────
@@ -1052,9 +1132,27 @@ async function executeTool(
 
       case "get_customaudiences": {
         const data = await metaGet(`/act_${accountId}/customaudiences`, token, {
-          fields: "id,name,subtype,approximate_count,data_source,time_created,time_updated,description",
+          fields: "id,name,subtype,approximate_count_lower_bound,approximate_count_upper_bound,data_source,time_created,time_updated,description",
           limit: "100",
         });
+        return { success: true, data };
+      }
+
+      case "create_lookalike": {
+        const lookalike_spec = {
+          origin: [{ id: input.origin_audience_id, type: "custom_audience" }],
+          ratio: Number(input.ratio),
+          country: input.country.toUpperCase(),
+          type: "similarity",
+        };
+        const body: Record<string, any> = {
+          name: input.name,
+          subtype: "LOOKALIKE",
+          lookalike_spec: JSON.stringify(lookalike_spec),
+        };
+        if (input.description) body.description = input.description;
+        const data = await metaPost(`/act_${accountId}/customaudiences`, token, body);
+        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
         return { success: true, data };
       }
 
@@ -1150,7 +1248,7 @@ async function executeTool(
 
       case "get_adrules": {
         const data = await metaGet(`/act_${accountId}/adrules`, token, {
-          fields: "id,name,status,evaluation_spec,execution_spec,schedule_spec,created_time",
+          fields: "id,name,status,evaluation_spec,execution_spec,created_time",
           limit: "100",
         });
         return { success: true, data };
