@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { CheckCircle2, LogOut, CalendarIcon, Bug } from "lucide-react";
+import { CheckCircle2, LogOut, CalendarIcon, Bug, Menu } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   format,
@@ -61,9 +61,10 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
 interface TopbarProps {
   onToggleDebug?: () => void;
   debugOpen?: boolean;
+  onMenuClick?: () => void;
 }
 
-export function Topbar({ onToggleDebug, debugOpen }: TopbarProps) {
+export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
   const { clearToken, isValidated } = useAuthStore();
   const { accounts, setAccounts, selectedAccountId, selectAccount } = useAccountStore();
   const { since, until, preset, setDateRange } = useDateStore();
@@ -102,27 +103,162 @@ export function Topbar({ onToggleDebug, debugOpen }: TopbarProps) {
   };
 
   return (
-    <div className="h-16 flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-md px-4 flex items-center justify-between sticky top-0 z-20">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        {/* Account selector */}
+    <div className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-20">
+      {/* ── Main row ──────────────────────────────────────────────────────── */}
+      <div className="h-14 px-3 md:px-4 flex items-center gap-2 md:gap-3">
+
+        {/* Hamburger — mobile only */}
+        <button
+          onClick={onMenuClick}
+          className="md:hidden p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors flex-shrink-0"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+
+        {/* ── Left controls (desktop/tablet) ──────────────────────────── */}
+        <div className="hidden sm:flex items-center gap-2 flex-1 min-w-0">
+          {/* Account selector */}
+          <Select value={selectedAccountId || ""} onValueChange={selectAccount}>
+            <SelectTrigger
+              className="w-[180px] lg:w-[240px] bg-background border-border text-sm"
+              data-testid="select-account"
+            >
+              <SelectValue placeholder="Select Ad Account" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60">
+              {accounts.map((acc) => (
+                <SelectItem key={acc.id} value={acc.id} data-testid={`account-option-${acc.id}`}>
+                  <span className="font-medium">{acc.name}</span>
+                  <span className="ml-2 text-muted-foreground text-xs">({acc.currency})</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Date preset */}
+          <Select value={preset} onValueChange={handlePreset}>
+            <SelectTrigger
+              className="w-[120px] lg:w-[150px] bg-background border-border text-sm"
+              data-testid="select-date-preset"
+            >
+              <SelectValue placeholder="Date range" />
+            </SelectTrigger>
+            <SelectContent>
+              {PRESETS.map((p) => (
+                <SelectItem key={p.label} value={p.label}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Custom calendar — hidden on tablet, shown on md+ */}
+          <Popover open={calOpen} onOpenChange={setCalOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn(
+                  "border-border bg-background font-normal gap-2 hidden md:flex",
+                  preset === "Custom" && "border-primary/60 text-primary"
+                )}
+                data-testid="btn-custom-date"
+              >
+                <CalendarIcon className="h-3.5 w-3.5" />
+                <span className="hidden lg:inline">
+                  {preset === "Custom" ? `${since} → ${until}` : "Custom"}
+                </span>
+                <span className="lg:hidden">Custom</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0 bg-card border-border" align="start">
+              <Calendar
+                mode="range"
+                selected={calRange}
+                onSelect={setCalRange}
+                numberOfMonths={2}
+                defaultMonth={new Date(since)}
+                className="rounded-md"
+              />
+              <div className="flex justify-end gap-2 p-3 border-t border-border">
+                <Button variant="ghost" size="sm" onClick={() => setCalOpen(false)}>Cancel</Button>
+                <Button size="sm" onClick={applyCustomRange} disabled={!calRange?.from || !calRange?.to}>
+                  Apply
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Active date display — desktop only */}
+          <span className="text-xs text-muted-foreground hidden xl:block font-mono bg-background border border-border px-2 py-1 rounded whitespace-nowrap">
+            {since} → {until}
+          </span>
+        </div>
+
+        {/* Spacer — on mobile, push right controls to end */}
+        <div className="flex-1 sm:hidden" />
+
+        {/* ── Right controls ───────────────────────────────────────────── */}
+        <div className="flex items-center gap-1 md:gap-2">
+          {/* User badge */}
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground bg-background px-2 md:px-3 py-1.5 rounded-full border border-border">
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+            <span className="hidden md:block truncate max-w-[100px] lg:max-w-[140px] text-xs">
+              {meData?.name || "Connected"}
+            </span>
+          </div>
+
+          {/* Debug toggle — hidden on mobile */}
+          {onToggleDebug && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleDebug}
+              className={cn("h-8 w-8 hidden md:flex", debugOpen && "text-primary")}
+              title="Toggle debug panel"
+              data-testid="btn-debug"
+            >
+              <Bug className="h-4 w-4" />
+            </Button>
+          )}
+
+          {/* Logout */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { clearToken(); setLocation("/"); }}
+            className="border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors px-2 md:px-3"
+            data-testid="btn-change-token"
+          >
+            <LogOut className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden sm:inline ml-1.5">Token</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Mobile second row — account + date ────────────────────────────── */}
+      <div className="sm:hidden px-3 pb-2.5 flex gap-2">
         <Select value={selectedAccountId || ""} onValueChange={selectAccount}>
-          <SelectTrigger className="w-[240px] bg-background border-border" data-testid="select-account">
+          <SelectTrigger
+            className="flex-1 min-w-0 bg-background border-border text-xs h-9"
+            data-testid="select-account-mobile"
+          >
             <SelectValue placeholder="Select Ad Account" />
           </SelectTrigger>
           <SelectContent className="max-h-60">
             {accounts.map((acc) => (
-              <SelectItem key={acc.id} value={acc.id} data-testid={`account-option-${acc.id}`}>
+              <SelectItem key={acc.id} value={acc.id}>
                 <span className="font-medium">{acc.name}</span>
-                <span className="ml-2 text-muted-foreground text-xs">({acc.currency})</span>
+                <span className="ml-1.5 text-muted-foreground text-xs">({acc.currency})</span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        {/* Date preset selector */}
         <Select value={preset} onValueChange={handlePreset}>
-          <SelectTrigger className="w-[150px] bg-background border-border" data-testid="select-date-preset">
-            <SelectValue placeholder="Date range" />
+          <SelectTrigger className="w-[110px] bg-background border-border text-xs h-9">
+            <SelectValue placeholder="Range" />
           </SelectTrigger>
           <SelectContent>
             {PRESETS.map((p) => (
@@ -133,28 +269,26 @@ export function Topbar({ onToggleDebug, debugOpen }: TopbarProps) {
           </SelectContent>
         </Select>
 
-        {/* Custom calendar popover */}
+        {/* Mobile calendar trigger */}
         <Popover open={calOpen} onOpenChange={setCalOpen}>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               size="sm"
               className={cn(
-                "border-border bg-background font-normal gap-2",
+                "h-9 w-9 p-0 border-border bg-background flex-shrink-0",
                 preset === "Custom" && "border-primary/60 text-primary"
               )}
-              data-testid="btn-custom-date"
             >
               <CalendarIcon className="h-3.5 w-3.5" />
-              {preset === "Custom" ? `${since} → ${until}` : "Custom"}
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-auto p-0 bg-card border-border" align="start">
+          <PopoverContent className="w-auto p-0 bg-card border-border" align="end">
             <Calendar
               mode="range"
               selected={calRange}
               onSelect={setCalRange}
-              numberOfMonths={2}
+              numberOfMonths={1}
               defaultMonth={new Date(since)}
               className="rounded-md"
             />
@@ -166,40 +300,6 @@ export function Topbar({ onToggleDebug, debugOpen }: TopbarProps) {
             </div>
           </PopoverContent>
         </Popover>
-
-        {/* Active date display */}
-        <span className="text-xs text-muted-foreground hidden lg:block font-mono bg-background border border-border px-2 py-1 rounded">
-          {since} → {until}
-        </span>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-background px-3 py-1.5 rounded-full border border-border">
-          <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-          <span className="hidden sm:block truncate max-w-[120px]">{meData?.name || "Connected"}</span>
-        </div>
-        {onToggleDebug && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleDebug}
-            className={cn("h-8 w-8", debugOpen && "text-primary")}
-            title="Toggle debug panel"
-            data-testid="btn-debug"
-          >
-            <Bug className="h-4 w-4" />
-          </Button>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => { clearToken(); setLocation("/"); }}
-          className="border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors"
-          data-testid="btn-change-token"
-        >
-          <LogOut className="h-4 w-4 mr-1.5" />
-          Change Token
-        </Button>
       </div>
     </div>
   );
