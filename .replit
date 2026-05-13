@@ -49,8 +49,9 @@ args = "PORT=18098 BASE_PATH=/ pnpm --filter @workspace/joex-ads run dev"
 waitForPort = 18098
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
+integrations = ["javascript_anthropic_ai_integrations:2.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
