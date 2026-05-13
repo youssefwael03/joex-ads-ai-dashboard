@@ -1,0 +1,117 @@
+Analyze the entire AI assistant implementation in this project and explain EXACTLY how it works internally.
+
+I need a full technical breakdown of the AI assistant architecture.
+
+Please inspect and explain:
+
+1. Which AI provider is being used?
+   Examples:
+
+* Anthropic Claude
+* OpenAI
+* OpenRouter
+* Gemini
+* Groq
+* Replit built-in AI
+* Vercel AI SDK
+* Other
+
+2. Find ALL files related to the AI assistant.
+
+Search for:
+
+* chat components
+* AI services
+* API routes
+* hooks
+* providers
+* SDK usage
+* streaming logic
+* assistant prompts
+* model configs
+
+3. Show where the API key comes from.
+
+Check:
+
+* .env
+* .env.local
+* environment variables
+* Replit secrets
+* hidden provider configs
+
+Explain whether:
+
+* the project uses a hardcoded key
+* Replit-managed AI
+* temporary sandbox credentials
+* user-provided API key
+* server-side secret injection
+
+4. Explain the exact request flow.
+
+I want to know:
+
+* frontend component
+* API route
+* provider call
+* response handling
+* streaming implementation
+* message persistence
+* context injection
+
+5. Identify the exact model being used.
+
+Examples:
+
+* claude-3-sonnet
+* claude-3.7-sonnet
+* gpt-4o
+* gemini
+* deepseek
+* etc
+
+6. Explain why this error happens:
+
+403 FREE_TIER_BUDGET_EXCEEDED
+
+Explain:
+
+* which provider generated it
+* where the quota is managed
+* why it works in some project sessions and not others
+
+7. Trace all AI dependencies.
+
+List all packages related to AI:
+
+* anthropic sdk
+* ai sdk
+* openai sdk
+* langchain
+* openrouter
+* etc
+
+8. Explain how the assistant accesses Meta Ads data.
+
+I need to know:
+
+* how the assistant reads campaign data
+* how account context is injected
+* whether live Meta API calls are happening
+* how prompts are constructed
+
+9. Output a COMPLETE architecture summary.
+
+I want:
+
+* file paths
+* code flow
+* provider details
+* API structure
+* environment variable names
+* all assistant-related logic
+
+DO NOT modify the code.
+
+ONLY inspect, trace, and explain the existing implementation in detail.
