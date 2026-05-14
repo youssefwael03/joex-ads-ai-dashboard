@@ -2,24 +2,69 @@ import { Router, type IRouter } from "express";
 
 const router: IRouter = Router();
 
-// ── OpenRouter config ──────────────────────────────────────────────────────────
+// ── Provider detection ────────────────────────────────────────────────────────
+// Priority: OPENROUTER_API_KEY → OpenRouter (free models)
+//           OPENAI_API_KEY     → OpenAI directly (api.openai.com)
 
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+type Provider = "openrouter" | "openai";
 
-const FALLBACK_MODELS = [
-  "deepseek/deepseek-chat-v3-0324:free",
-  "google/gemini-2.0-flash-exp:free",
-  "qwen/qwen3-32b:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-] as const;
-
-type FallbackModel = (typeof FALLBACK_MODELS)[number];
+function getProvider(): Provider {
+  if (process.env.OPENROUTER_API_KEY) return "openrouter";
+  if (process.env.OPENAI_API_KEY)     return "openai";
+  throw new Error("No AI API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY.");
+}
 
 function getApiKey(): string {
   const key = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
+  if (!key) throw new Error("No AI API key configured.");
   return key;
 }
+
+// ── Model catalogues ─────────────────────────────────────────────────────────
+
+interface ModelInfo { id: string; name: string; description: string }
+
+const OPENROUTER_MODELS: ModelInfo[] = [
+  { id: "auto",                                     name: "Auto",             description: "Best available with automatic fallback" },
+  { id: "deepseek/deepseek-chat-v3-0324:free",      name: "DeepSeek V3",      description: "Best reasoning & tool use (free)" },
+  { id: "google/gemini-2.0-flash-exp:free",         name: "Gemini 2.0 Flash", description: "Fast & multimodal (free)" },
+  { id: "qwen/qwen3-32b:free",                      name: "Qwen3 32B",        description: "Strong analytical model (free)" },
+  { id: "meta-llama/llama-3.3-70b-instruct:free",   name: "Llama 3.3 70B",   description: "Open-source powerhouse (free)" },
+];
+
+const OPENAI_MODELS: ModelInfo[] = [
+  { id: "auto",          name: "Auto",          description: "Best available with automatic fallback" },
+  { id: "gpt-4o-mini",   name: "GPT-4o mini",   description: "Fast & affordable" },
+  { id: "gpt-4o",        name: "GPT-4o",        description: "Powerful & accurate" },
+  { id: "gpt-4.1-mini",  name: "GPT-4.1 mini",  description: "Latest efficient model" },
+  { id: "gpt-4.1",       name: "GPT-4.1",       description: "Latest powerful model" },
+];
+
+function getModels(): ModelInfo[] {
+  try {
+    return getProvider() === "openrouter" ? OPENROUTER_MODELS : OPENAI_MODELS;
+  } catch {
+    return OPENAI_MODELS;
+  }
+}
+
+// Returns the chain of model IDs to try in order.
+// If requestedModel is "auto", returns the full fallback chain.
+// Otherwise returns just the one model (no fallback).
+function buildFallbackChain(requestedModel: string): string[] {
+  if (requestedModel !== "auto") return [requestedModel];
+  try {
+    if (getProvider() === "openrouter") {
+      return OPENROUTER_MODELS.filter((m) => m.id !== "auto").map((m) => m.id);
+    } else {
+      return ["gpt-4o-mini", "gpt-4o"];
+    }
+  } catch {
+    return ["gpt-4o-mini"];
+  }
+}
+
+// ── Shared types ──────────────────────────────────────────────────────────────
 
 interface OAIToolCall {
   id: string;
@@ -43,25 +88,39 @@ interface OAIResponse {
   error?: { message?: string; code?: string };
 }
 
-async function callOpenRouter(
+// ── Unified AI call ───────────────────────────────────────────────────────────
+
+async function callAI(
   messages: OAIMessage[],
   tools: object[],
-  model: FallbackModel,
+  model: string,
 ): Promise<OAIResponse> {
-  const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+  const provider = getProvider();
+  const apiKey   = getApiKey();
+
+  const headers: Record<string, string> = {
+    "Content-Type":  "application/json",
+    "Authorization": `Bearer ${apiKey}`,
+  };
+
+  let url: string;
+  if (provider === "openrouter") {
+    url = "https://openrouter.ai/api/v1/chat/completions";
+    headers["HTTP-Referer"] = "https://joexads.repl.co";
+    headers["X-Title"]      = "Joex Ads Dashboard";
+  } else {
+    url = "https://api.openai.com/v1/chat/completions";
+  }
+
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${getApiKey()}`,
-      "HTTP-Referer": "https://joexads.repl.co",
-      "X-Title": "Joex Ads Dashboard",
-    },
+    headers,
     body: JSON.stringify({
       model,
       messages,
-      tools: tools.length > 0 ? tools : undefined,
+      tools:       tools.length > 0 ? tools : undefined,
       tool_choice: tools.length > 0 ? "auto" : undefined,
-      max_tokens: 3000,
+      max_tokens:  3000,
       temperature: 0.3,
     }),
     signal: AbortSignal.timeout(60_000),
@@ -77,7 +136,7 @@ async function callOpenRouter(
   }
 
   const data = (await res.json()) as OAIResponse;
-  if (data.error) throw new Error(data.error.message || data.error.code || "OpenRouter error");
+  if (data.error) throw new Error(data.error.message || data.error.code || "API error");
   return data;
 }
 
@@ -1453,6 +1512,17 @@ function trimData(data: unknown, maxItems = 80): unknown {
   return data;
 }
 
+// ── Models endpoint ───────────────────────────────────────────────────────────
+
+router.get("/ai/models", (_req, res): void => {
+  try {
+    const provider = getProvider();
+    res.json({ provider, models: getModels() });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "No API key configured" });
+  }
+});
+
 // ── Main route ─────────────────────────────────────────────────────────────────
 
 router.post("/ai/chat", async (req, res): Promise<void> => {
@@ -1464,8 +1534,9 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     return;
   }
 
-  const { messages, context } = req.body as {
+  const { messages, context, model: requestedModel = "auto" } = req.body as {
     messages: { role: "user" | "assistant"; content: string }[];
+    model?: string;
     context?: {
       accountId?: string;
       accountName?: string;
@@ -1571,7 +1642,8 @@ OPERATING RULES:
       })),
     ];
 
-    let currentModel: FallbackModel = FALLBACK_MODELS[0];
+    const fallbackChain = buildFallbackChain(requestedModel);
+    let currentModel: string = fallbackChain[0];
     let modelIndex = 0;
     const tokensTotal = { prompt: 0, completion: 0, total: 0 };
     const startTime = Date.now();
@@ -1583,18 +1655,18 @@ OPERATING RULES:
       let response: OAIResponse | null = null;
 
       // Try fallback chain starting from current model index
-      for (let mi = modelIndex; mi < FALLBACK_MODELS.length; mi++) {
+      for (let mi = modelIndex; mi < fallbackChain.length; mi++) {
         try {
-          response = await callOpenRouter(currentMessages, oaiTools, FALLBACK_MODELS[mi]);
+          response = await callAI(currentMessages, oaiTools, fallbackChain[mi]);
           if (mi !== modelIndex) {
             const prevModel = currentModel;
-            currentModel = FALLBACK_MODELS[mi];
+            currentModel = fallbackChain[mi];
             modelIndex = mi;
             emit({ type: "fallback", from: prevModel, to: currentModel, model: currentModel });
           }
           break;
         } catch (err) {
-          if (mi === FALLBACK_MODELS.length - 1) throw err;
+          if (mi === fallbackChain.length - 1) throw err;
           // try next model silently
         }
       }

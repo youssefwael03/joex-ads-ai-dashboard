@@ -6,15 +6,30 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from "@/components/ui/dropdown-menu";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BrainCircuit, Send, User, Sparkles, Loader2, RotateCcw,
   Database, CheckCircle2, XCircle, Zap, Play, Pause, DollarSign,
   TrendingUp, BarChart3, Globe, Smartphone, Calendar, Users,
-  Cpu, Clock, AlertTriangle,
+  Cpu, Clock, AlertTriangle, ChevronDown,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  description: string;
+}
 
 interface ApiMessage {
   role: "user" | "assistant";
@@ -306,14 +321,31 @@ export default function AIAssistant() {
   const { since, until }  = useDateStore();
   const currency          = useAccountCurrency();
 
-  const [displayItems, setDisplayItems] = useState<DisplayItem[]>([]);
-  const [apiMessages,  setApiMessages]  = useState<ApiMessage[]>([]);
-  const [isLoading,    setIsLoading]    = useState(false);
-  const [input,        setInput]        = useState("");
-  const [currentModel, setCurrentModel] = useState<string>("");
+  const [displayItems,   setDisplayItems]   = useState<DisplayItem[]>([]);
+  const [apiMessages,    setApiMessages]    = useState<ApiMessage[]>([]);
+  const [isLoading,      setIsLoading]      = useState(false);
+  const [input,          setInput]          = useState("");
+  const [currentModel,   setCurrentModel]   = useState<string>("");
+  const [models,         setModels]         = useState<ModelInfo[]>([]);
+  const [selectedModel,  setSelectedModel]  = useState<string>("auto");
+  const [provider,       setProvider]       = useState<string>("");
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fetch available models from backend
+  useEffect(() => {
+    const token = localStorage.getItem("joex_ads_token");
+    fetch("/api/ai/models", {
+      headers: token ? { "X-Meta-Token": token } : {},
+    })
+      .then((r) => r.json())
+      .then((d: { provider: string; models: ModelInfo[] }) => {
+        setModels(d.models ?? []);
+        setProvider(d.provider ?? "");
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -350,6 +382,7 @@ export default function AIAssistant() {
           },
           body: JSON.stringify({
             messages: newApiMessages,
+            model: selectedModel,
             context: {
               accountId:   selectedAccountId ?? undefined,
               accountName: selectedAccountName ?? undefined,
@@ -526,7 +559,7 @@ export default function AIAssistant() {
         textareaRef.current?.focus();
       }
     },
-    [apiMessages, isLoading, selectedAccountId, selectedAccountName, currency, since, until],
+    [apiMessages, isLoading, selectedAccountId, selectedAccountName, currency, since, until, selectedModel],
   );
 
   const clearChat = () => {
@@ -571,13 +604,50 @@ export default function AIAssistant() {
               Live · {currency}
             </Badge>
           )}
-          {/* Current model badge */}
-          {currentModel && (
-            <Badge variant="outline" className="text-xs border-secondary/30 text-secondary gap-1.5">
+
+          {/* Model selector */}
+          {models.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs border-card-border bg-card/40 hover:bg-card/80 text-muted-foreground hover:text-foreground"
+                >
+                  <Cpu className="h-3 w-3 shrink-0" />
+                  <span>
+                    {currentModel
+                      ? fmtModel(currentModel)
+                      : (models.find((m) => m.id === selectedModel)?.name ?? "Auto")}
+                  </span>
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
+                  {provider === "openrouter" ? "OpenRouter Models (free)" : "OpenAI Models"}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup value={selectedModel} onValueChange={setSelectedModel}>
+                  {models.map((m) => (
+                    <DropdownMenuRadioItem key={m.id} value={m.id} className="flex-col items-start gap-0">
+                      <span className="font-medium text-sm">{m.name}</span>
+                      <span className="text-xs text-muted-foreground">{m.description}</span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {/* Active model badge (when chatting) */}
+          {currentModel && isLoading && (
+            <Badge variant="outline" className="text-xs border-secondary/30 text-secondary gap-1.5 animate-pulse">
               <Cpu className="h-2.5 w-2.5" />
               {fmtModel(currentModel)}
             </Badge>
           )}
+
           {/* Tool count */}
           {toolCount > 0 && (
             <Badge variant="outline" className="text-xs border-primary/30 text-primary gap-1">
@@ -585,6 +655,7 @@ export default function AIAssistant() {
               {toolCount} queries
             </Badge>
           )}
+
           {/* Clear */}
           {displayItems.length > 0 && (
             <Button
