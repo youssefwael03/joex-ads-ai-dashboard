@@ -28,12 +28,21 @@ function getApiKey(): string {
 
 interface ModelInfo { id: string; name: string; description: string }
 
-const OPENROUTER_MODELS: ModelInfo[] = [
-  { id: "auto",                                              name: "Auto",                    description: "Tries all models in order, skips unavailable ones" },
-  { id: "deepseek/deepseek-v4-flash:free",                  name: "DeepSeek V4 Flash",       description: "Latest DeepSeek, fast responses (free)" },
-  { id: "qwen/qwen3-next-80b-a3b-instruct:free",            name: "Qwen3 Next 80B",          description: "Next-gen Qwen, powerful (free)" },
-  { id: "qwen/qwen3-coder:free",                            name: "Qwen3 Coder",             description: "Strong analytical & coding model (free)" },
-  { id: "arcee-ai/trinity-large-thinking:free",             name: "Trinity Large Thinking",  description: "Deep thinking & reasoning (free)" },
+// Static fallback list — used when OpenRouter API is unreachable.
+// Curated: all support tool-calling, verified working. Sorted by quality/size.
+const OPENROUTER_MODELS_STATIC: ModelInfo[] = [
+  { id: "auto",                                         name: "Auto",                      description: "Tries all free models in order, skips unavailable ones" },
+  { id: "openrouter/free",                              name: "Free Router",               description: "OpenRouter picks the best available free model automatically" },
+  { id: "deepseek/deepseek-v4-flash:free",              name: "DeepSeek V4 Flash",         description: "Latest DeepSeek — fast & powerful (free, 1M ctx)" },
+  { id: "arcee-ai/trinity-large-thinking:free",         name: "Trinity Large Thinking",    description: "Deep reasoning & thinking model (free, 262K ctx)" },
+  { id: "nvidia/nemotron-3-super-120b-a12b:free",       name: "NVIDIA Nemotron 3 Super",   description: "NVIDIA 120B MoE — strong reasoning (free, 262K ctx)" },
+  { id: "google/gemma-4-31b-it:free",                   name: "Google Gemma 4 31B",        description: "Google's latest Gemma — balanced quality (free, 262K ctx)" },
+  { id: "openai/gpt-oss-120b:free",                     name: "OpenAI OSS 120B",           description: "OpenAI open-source 120B model (free, 131K ctx)" },
+  { id: "openai/gpt-oss-20b:free",                      name: "OpenAI OSS 20B",            description: "OpenAI open-source 20B — fast (free, 131K ctx)" },
+  { id: "minimax/minimax-m2.5:free",                    name: "MiniMax M2.5",              description: "MiniMax M2.5 — strong multilingual model (free, 196K ctx)" },
+  { id: "meta-llama/llama-3.3-70b-instruct:free",       name: "Llama 3.3 70B",             description: "Meta Llama 3.3 70B — reliable workhorse (free, 65K ctx)" },
+  { id: "nvidia/nemotron-3-nano-30b-a3b:free",          name: "NVIDIA Nemotron Nano 30B",  description: "NVIDIA 30B MoE — lightweight & fast (free, 256K ctx)" },
+  { id: "inclusionai/ring-2.6-1t:free",                 name: "Ring 2.6 1T",               description: "inclusionAI 1 trillion param model (free, 262K ctx)" },
 ];
 
 const OPENAI_MODELS: ModelInfo[] = [
@@ -44,22 +53,116 @@ const OPENAI_MODELS: ModelInfo[] = [
   { id: "gpt-4.1",       name: "GPT-4.1",       description: "Latest powerful model" },
 ];
 
-function getModels(): ModelInfo[] {
+// ── Dynamic free-model fetcher (OpenRouter) ───────────────────────────────────
+// Fetches all free tool-supporting models live from OpenRouter and caches for 5 min.
+
+interface CachedModels { models: ModelInfo[]; fetchedAt: number }
+let _openrouterCache: CachedModels | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+// Models to skip — known broken or low-quality
+const SKIP_IDS = new Set([
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "qwen/qwen3-coder:free",
+  "openrouter/owl-alpha",
+]);
+
+// Nice display names for known model IDs
+const MODEL_NAMES: Record<string, string> = {
+  "openrouter/free":                              "Free Router",
+  "deepseek/deepseek-v4-flash:free":              "DeepSeek V4 Flash",
+  "arcee-ai/trinity-large-thinking:free":         "Trinity Large Thinking",
+  "nvidia/nemotron-3-super-120b-a12b:free":       "NVIDIA Nemotron 3 Super",
+  "google/gemma-4-31b-it:free":                   "Google Gemma 4 31B",
+  "google/gemma-4-26b-a4b-it:free":               "Google Gemma 4 26B",
+  "openai/gpt-oss-120b:free":                     "OpenAI OSS 120B",
+  "openai/gpt-oss-20b:free":                      "OpenAI OSS 20B",
+  "minimax/minimax-m2.5:free":                    "MiniMax M2.5",
+  "meta-llama/llama-3.3-70b-instruct:free":       "Llama 3.3 70B",
+  "meta-llama/llama-3.2-3b-instruct:free":        "Llama 3.2 3B",
+  "nvidia/nemotron-3-nano-30b-a3b:free":          "NVIDIA Nemotron Nano 30B",
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "NVIDIA Nemotron Nano Omni",
+  "nvidia/nemotron-nano-12b-v2-vl:free":          "NVIDIA Nemotron Nano 12B",
+  "nvidia/nemotron-nano-9b-v2:free":              "NVIDIA Nemotron Nano 9B",
+  "inclusionai/ring-2.6-1t:free":                 "Ring 2.6 1T",
+  "nousresearch/hermes-3-llama-3.1-405b:free":    "Hermes 3 405B",
+  "z-ai/glm-4.5-air:free":                        "GLM 4.5 Air",
+  "poolside/laguna-m.1:free":                     "Poolside Laguna M.1",
+  "poolside/laguna-xs.2:free":                    "Poolside Laguna XS.2",
+  "baidu/cobuddy:free":                           "CoBuddy",
+  "liquid/lfm-2.5-1.2b-thinking:free":            "LFM 2.5 Thinking",
+};
+
+async function fetchFreeModelsFromOpenRouter(): Promise<ModelInfo[]> {
+  const now = Date.now();
+  if (_openrouterCache && now - _openrouterCache.fetchedAt < CACHE_TTL_MS) {
+    return _openrouterCache.models;
+  }
+
   try {
-    return getProvider() === "openrouter" ? OPENROUTER_MODELS : OPENAI_MODELS;
+    const resp = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) throw new Error(`OpenRouter models API: ${resp.status}`);
+
+    const json = await resp.json() as { data: Array<{
+      id: string; name: string; context_length?: number;
+      pricing?: { prompt: string; completion: string };
+      supported_parameters?: string[];
+    }> };
+
+    // Filter: free + supports tools + not in skip list
+    const free = json.data.filter((m) =>
+      m.pricing?.prompt === "0" &&
+      m.pricing?.completion === "0" &&
+      m.supported_parameters?.includes("tools") &&
+      !SKIP_IDS.has(m.id)
+    );
+
+    // Sort by context length descending (bigger = more capable)
+    free.sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0));
+
+    const models: ModelInfo[] = [
+      { id: "auto",          name: "Auto",        description: "Tries all free models in order, skips unavailable ones" },
+      { id: "openrouter/free", name: "Free Router", description: "OpenRouter picks the best available free model automatically" },
+      ...free.map((m) => ({
+        id:          m.id,
+        name:        MODEL_NAMES[m.id] ?? m.name.replace(/^[^:]+:\s*/, "").replace(/\s*\(free\)$/i, "").trim(),
+        description: `Free · ${((m.context_length ?? 0) / 1000).toFixed(0)}K ctx`,
+      })),
+    ];
+
+    _openrouterCache = { models, fetchedAt: now };
+    return models;
+  } catch {
+    // Return cached value (even stale) or static fallback
+    return _openrouterCache?.models ?? OPENROUTER_MODELS_STATIC;
+  }
+}
+
+async function getModels(): Promise<ModelInfo[]> {
+  try {
+    return getProvider() === "openrouter"
+      ? await fetchFreeModelsFromOpenRouter()
+      : OPENAI_MODELS;
   } catch {
     return OPENAI_MODELS;
   }
 }
 
+// ── Fallback chain ─────────────────────────────────────────────────────────────
+
 // Returns the chain of model IDs to try in order.
 // "auto" → full chain. Specific model → that model first, then remaining chain as emergency fallback.
-function buildFallbackChain(requestedModel: string): string[] {
+async function buildFallbackChain(requestedModel: string): Promise<string[]> {
   try {
     if (getProvider() === "openrouter") {
-      const all = OPENROUTER_MODELS.filter((m) => m.id !== "auto").map((m) => m.id);
+      const models = await fetchFreeModelsFromOpenRouter();
+      // Exclude "auto" and "openrouter/free" from the raw fallback chain
+      const all = models.filter((m) => m.id !== "auto" && m.id !== "openrouter/free").map((m) => m.id);
       if (requestedModel === "auto") return all;
-      // Specific model: try it first, then the rest of the chain (skip duplicates)
+      if (requestedModel === "openrouter/free") return ["openrouter/free", ...all];
       return [requestedModel, ...all.filter((id) => id !== requestedModel)];
     } else {
       const all = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"];
@@ -1535,10 +1638,11 @@ function trimData(data: unknown, maxItems = 80): unknown {
 
 // ── Models endpoint ───────────────────────────────────────────────────────────
 
-router.get("/ai/models", (_req, res): void => {
+router.get("/ai/models", async (_req, res): Promise<void> => {
   try {
     const provider = getProvider();
-    res.json({ provider, models: getModels() });
+    const models = await getModels();
+    res.json({ provider, models });
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : "No API key configured" });
   }
@@ -1663,7 +1767,7 @@ OPERATING RULES:
       })),
     ];
 
-    const fallbackChain = buildFallbackChain(requestedModel);
+    const fallbackChain = await buildFallbackChain(requestedModel);
     let currentModel: string = fallbackChain[0];
     let modelIndex = 0;
     const tokensTotal = { prompt: 0, completion: 0, total: 0 };
