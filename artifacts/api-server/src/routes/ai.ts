@@ -1,7 +1,85 @@
 import { Router, type IRouter } from "express";
-import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router: IRouter = Router();
+
+// ── OpenRouter config ──────────────────────────────────────────────────────────
+
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+const FALLBACK_MODELS = [
+  "deepseek/deepseek-chat-v3-0324:free",
+  "google/gemini-2.0-flash-exp:free",
+  "qwen/qwen3-32b:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+] as const;
+
+type FallbackModel = (typeof FALLBACK_MODELS)[number];
+
+function getApiKey(): string {
+  const key = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
+  return key;
+}
+
+interface OAIToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+interface OAIMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: OAIToolCall[];
+  tool_call_id?: string;
+}
+
+interface OAIResponse {
+  choices: {
+    message: { role: string; content: string | null; tool_calls?: OAIToolCall[] };
+    finish_reason: string;
+  }[];
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  error?: { message?: string; code?: string };
+}
+
+async function callOpenRouter(
+  messages: OAIMessage[],
+  tools: object[],
+  model: FallbackModel,
+): Promise<OAIResponse> {
+  const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+      "HTTP-Referer": "https://joexads.repl.co",
+      "X-Title": "Joex Ads Dashboard",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      tools: tools.length > 0 ? tools : undefined,
+      tool_choice: tools.length > 0 ? "auto" : undefined,
+      max_tokens: 3000,
+      temperature: 0.3,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    let errMsg = `HTTP ${res.status}`;
+    try {
+      const errBody = (await res.json()) as any;
+      errMsg = errBody?.error?.message || errBody?.error?.code || errMsg;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = (await res.json()) as OAIResponse;
+  if (data.error) throw new Error(data.error.message || data.error.code || "OpenRouter error");
+  return data;
+}
 
 const META_BASE = "https://graph.facebook.com/v22.0";
 
@@ -57,9 +135,24 @@ const INSIGHT_FIELDS =
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
 
-type AnthropicTool = Parameters<typeof anthropic.messages.create>[0]["tools"] extends (infer T)[] | undefined ? T : never;
+interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: { type: "object"; properties: Record<string, any>; required?: string[] };
+}
 
-const TOOLS: AnthropicTool[] = [
+function toOAITools(tools: ToolDef[]): object[] {
+  return tools.map((t) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    },
+  }));
+}
+
+const TOOLS: ToolDef[] = [
 
   // ── INSIGHTS & OVERVIEW ──────────────────────────────────────────────────────
 
@@ -1468,101 +1561,101 @@ OPERATING RULES:
   };
 
   try {
-    type MessageParam = Parameters<typeof anthropic.messages.create>[0]["messages"][number];
-    let currentMessages: MessageParam[] = messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const oaiTools = accountId ? toOAITools(TOOLS) : [];
 
-    const tools = accountId ? TOOLS : [];
+    let currentMessages: OAIMessage[] = [
+      { role: "system", content: systemPrompt },
+      ...messages.map((m: { role: string; content: string }) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    ];
 
-    // Agentic loop — max 12 iterations
-    for (let iter = 0; iter < 12; iter++) {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8192,
-        system: systemPrompt,
-        tools,
-        messages: currentMessages,
+    let currentModel: FallbackModel = FALLBACK_MODELS[0];
+    let modelIndex = 0;
+    const tokensTotal = { prompt: 0, completion: 0, total: 0 };
+    const startTime = Date.now();
+
+    emit({ type: "model", model: currentModel });
+
+    // Agentic loop — max 5 iterations
+    for (let iter = 0; iter < 5; iter++) {
+      let response: OAIResponse | null = null;
+
+      // Try fallback chain starting from current model index
+      for (let mi = modelIndex; mi < FALLBACK_MODELS.length; mi++) {
+        try {
+          response = await callOpenRouter(currentMessages, oaiTools, FALLBACK_MODELS[mi]);
+          if (mi !== modelIndex) {
+            const prevModel = currentModel;
+            currentModel = FALLBACK_MODELS[mi];
+            modelIndex = mi;
+            emit({ type: "fallback", from: prevModel, to: currentModel, model: currentModel });
+          }
+          break;
+        } catch (err) {
+          if (mi === FALLBACK_MODELS.length - 1) throw err;
+          // try next model silently
+        }
+      }
+
+      if (!response) throw new Error("All models failed");
+
+      if (response.usage) {
+        tokensTotal.prompt     += response.usage.prompt_tokens;
+        tokensTotal.completion += response.usage.completion_tokens;
+        tokensTotal.total      += response.usage.total_tokens;
+      }
+
+      const choice  = response.choices[0];
+      const message = choice.message;
+      const finish  = choice.finish_reason;
+
+      // Stream text content in small chunks
+      if (message.content) {
+        const chunkSize = 4;
+        for (let i = 0; i < message.content.length; i += chunkSize) {
+          emit({ content: message.content.slice(i, i + chunkSize) });
+        }
+      }
+
+      if (!message.tool_calls?.length || finish === "stop") {
+        break;
+      }
+
+      // Add assistant turn with tool_calls to history
+      currentMessages.push({
+        role: "assistant",
+        content: message.content ?? null,
+        tool_calls: message.tool_calls,
       });
 
-      // Stream text blocks in small chunks
-      for (const block of response.content) {
-        if (block.type === "text" && block.text) {
-          const chunkSize = 4;
-          for (let i = 0; i < block.text.length; i += chunkSize) {
-            emit({ content: block.text.slice(i, i + chunkSize) });
-          }
-        }
-      }
+      // Execute each tool call sequentially
+      for (const toolCall of message.tool_calls) {
+        const toolName = toolCall.function.name;
+        let toolInput: Record<string, any> = {};
+        try { toolInput = JSON.parse(toolCall.function.arguments || "{}"); } catch {}
 
-      if (response.stop_reason === "end_turn") {
-        break;
-      }
+        const isAction = ACTION_TOOLS.has(toolName);
 
-      if (response.stop_reason === "tool_use") {
-        const toolUseBlocks = response.content.filter(
-          (b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use",
-        );
+        emit({ type: "tool_call", tool: toolName, label: toolCallLabel(toolName, toolInput), isAction, input: toolInput });
 
-        const toolResults: MessageParam[] = [];
+        const result = await executeTool(toolName, toolInput, token, accountId, since, until);
 
-        for (const toolUse of toolUseBlocks) {
-          const input = (toolUse.input ?? {}) as Record<string, any>;
-          const isAction = ACTION_TOOLS.has(toolUse.name);
+        emit({ type: "tool_done", tool: toolName, label: toolDoneLabel(toolName, toolInput, result), isAction, success: result.success, error: result.error, input: toolInput });
 
-          emit({
-            type: "tool_call",
-            tool: toolUse.name,
-            label: toolCallLabel(toolUse.name, input),
-            isAction,
-            input,
-          });
-
-          const result = await executeTool(
-            toolUse.name,
-            input,
-            token,
-            accountId,
-            since,
-            until,
-          );
-
-          emit({
-            type: "tool_done",
-            tool: toolUse.name,
-            label: toolDoneLabel(toolUse.name, input, result),
-            isAction,
-            success: result.success,
-            error: result.error,
-            input,
-          });
-
-          toolResults.push({
-            role: "user",
-            content: [
-              {
-                type: "tool_result" as const,
-                tool_use_id: toolUse.id,
-                content: result.success
-                  ? JSON.stringify(trimData(result.data))
-                  : JSON.stringify({ error: result.error }),
-              },
-            ],
-          });
-        }
-
-        currentMessages = [
-          ...currentMessages,
-          { role: "assistant", content: response.content },
-          ...toolResults,
-        ];
-      } else {
-        break;
+        currentMessages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: result.success
+            ? JSON.stringify(trimData(result.data))
+            : JSON.stringify({ error: result.error }),
+        });
       }
     }
 
-    emit({ done: true });
+    const duration = Date.now() - startTime;
+    emit({ done: true, model: currentModel, tokens: tokensTotal, duration });
     res.end();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "AI error";
