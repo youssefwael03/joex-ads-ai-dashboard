@@ -31,6 +31,7 @@ interface ModelInfo { id: string; name: string; description: string }
 const OPENROUTER_MODELS: ModelInfo[] = [
   { id: "auto",                                          name: "Auto",               description: "Tries all models in order, skips unavailable ones" },
   { id: "deepseek/deepseek-chat-v3-0324:free",          name: "DeepSeek V3",        description: "Best reasoning & tool use (free)" },
+  { id: "deepseek/deepseek-v4-flash:free",              name: "DeepSeek V4 Flash",  description: "Latest DeepSeek, fast responses (free)" },
   { id: "deepseek/deepseek-r1:free",                    name: "DeepSeek R1",        description: "Advanced reasoning model (free)" },
   { id: "google/gemini-2.5-flash-preview-05-20:free",   name: "Gemini 2.5 Flash",   description: "Latest Gemini, fast & multimodal (free)" },
   { id: "qwen/qwen3-235b-a22b:free",                    name: "Qwen3 235B",         description: "Largest Qwen, powerful (free)" },
