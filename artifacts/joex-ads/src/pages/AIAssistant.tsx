@@ -458,6 +458,14 @@ export default function AIAssistant() {
                 });
               }
 
+              // ── Model error (skipped to next) ──────────────────────────────
+              if (parsed.type === "model_error") {
+                // Add to fallbacks list so UI shows which models were skipped
+                if (parsed.model && !accFallbacks.includes(parsed.model + "_err")) {
+                  accFallbacks.push(parsed.model + "_err", parsed.model + "_err");
+                }
+              }
+
               // ── Tool call started ──────────────────────────────────────────
               if (parsed.type === "tool_call") {
                 toolCounter++;

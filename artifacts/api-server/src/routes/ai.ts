@@ -29,11 +29,15 @@ function getApiKey(): string {
 interface ModelInfo { id: string; name: string; description: string }
 
 const OPENROUTER_MODELS: ModelInfo[] = [
-  { id: "auto",                                     name: "Auto",             description: "Best available with automatic fallback" },
-  { id: "deepseek/deepseek-chat-v3-0324:free",      name: "DeepSeek V3",      description: "Best reasoning & tool use (free)" },
-  { id: "google/gemini-2.0-flash-exp:free",         name: "Gemini 2.0 Flash", description: "Fast & multimodal (free)" },
-  { id: "qwen/qwen3-32b:free",                      name: "Qwen3 32B",        description: "Strong analytical model (free)" },
-  { id: "meta-llama/llama-3.3-70b-instruct:free",   name: "Llama 3.3 70B",   description: "Open-source powerhouse (free)" },
+  { id: "auto",                                          name: "Auto",               description: "Tries all models in order, skips unavailable ones" },
+  { id: "deepseek/deepseek-chat-v3-0324:free",          name: "DeepSeek V3",        description: "Best reasoning & tool use (free)" },
+  { id: "deepseek/deepseek-r1:free",                    name: "DeepSeek R1",        description: "Advanced reasoning model (free)" },
+  { id: "google/gemini-2.5-flash-preview-05-20:free",   name: "Gemini 2.5 Flash",   description: "Latest Gemini, fast & multimodal (free)" },
+  { id: "qwen/qwen3-235b-a22b:free",                    name: "Qwen3 235B",         description: "Largest Qwen, powerful (free)" },
+  { id: "qwen/qwen3-32b:free",                          name: "Qwen3 32B",          description: "Strong analytical model (free)" },
+  { id: "meta-llama/llama-3.3-70b-instruct:free",       name: "Llama 3.3 70B",     description: "Open-source powerhouse (free)" },
+  { id: "meta-llama/llama-3.1-8b-instruct:free",        name: "Llama 3.1 8B",      description: "Fast & lightweight (free)" },
+  { id: "mistralai/mistral-7b-instruct:free",            name: "Mistral 7B",        description: "Reliable & fast fallback (free)" },
 ];
 
 const OPENAI_MODELS: ModelInfo[] = [
@@ -53,19 +57,36 @@ function getModels(): ModelInfo[] {
 }
 
 // Returns the chain of model IDs to try in order.
-// If requestedModel is "auto", returns the full fallback chain.
-// Otherwise returns just the one model (no fallback).
+// "auto" → full chain. Specific model → that model first, then remaining chain as emergency fallback.
 function buildFallbackChain(requestedModel: string): string[] {
-  if (requestedModel !== "auto") return [requestedModel];
   try {
     if (getProvider() === "openrouter") {
-      return OPENROUTER_MODELS.filter((m) => m.id !== "auto").map((m) => m.id);
+      const all = OPENROUTER_MODELS.filter((m) => m.id !== "auto").map((m) => m.id);
+      if (requestedModel === "auto") return all;
+      // Specific model: try it first, then the rest of the chain (skip duplicates)
+      return [requestedModel, ...all.filter((id) => id !== requestedModel)];
     } else {
-      return ["gpt-4o-mini", "gpt-4o"];
+      const all = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"];
+      if (requestedModel === "auto") return all;
+      return [requestedModel, ...all.filter((id) => id !== requestedModel)];
     }
   } catch {
     return ["gpt-4o-mini"];
   }
+}
+
+// Decides whether an error from a model call is retryable (skip to next model).
+function isRetryableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : "";
+  // Always retry on capacity/availability errors
+  if (msg.includes("no endpoints found")) return true;
+  if (msg.includes("rate limit")) return true;
+  if (msg.includes("overloaded")) return true;
+  if (msg.includes("provider returned error")) return true;
+  if (msg.includes("503") || msg.includes("502") || msg.includes("529")) return true;
+  if (msg.includes("context length") || msg.includes("too many tokens")) return false; // not retryable
+  // Default: retry on any HTTP error from free models
+  return true;
 }
 
 // ── Shared types ──────────────────────────────────────────────────────────────
@@ -1659,6 +1680,7 @@ OPERATING RULES:
       let response: OAIResponse | null = null;
 
       // Try fallback chain starting from current model index
+      let lastErr: unknown;
       for (let mi = modelIndex; mi < fallbackChain.length; mi++) {
         try {
           response = await callAI(currentMessages, oaiTools, fallbackChain[mi]);
@@ -1670,12 +1692,27 @@ OPERATING RULES:
           }
           break;
         } catch (err) {
-          if (mi === fallbackChain.length - 1) throw err;
-          // try next model silently
+          lastErr = err;
+          const retryable = isRetryableError(err);
+          const isLast = mi === fallbackChain.length - 1;
+          if (!retryable || isLast) {
+            // Emit which model failed so frontend can show it
+            emit({ type: "model_error", model: fallbackChain[mi], error: err instanceof Error ? err.message : String(err) });
+            if (isLast) break;
+            // Non-retryable but not last: still throw
+            throw err;
+          }
+          // Retryable: emit notification and move to next model silently
+          if (!isLast) {
+            emit({ type: "model_error", model: fallbackChain[mi], error: err instanceof Error ? err.message : String(err) });
+          }
         }
       }
 
-      if (!response) throw new Error("All models failed");
+      if (!response) {
+        const errMsg = lastErr instanceof Error ? lastErr.message : "All models unavailable";
+        throw new Error(`All models failed. Last error: ${errMsg}`);
+      }
 
       if (response.usage) {
         tokensTotal.prompt     += response.usage.prompt_tokens;
