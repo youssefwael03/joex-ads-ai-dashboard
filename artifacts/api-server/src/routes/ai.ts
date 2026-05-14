@@ -9,9 +9,13 @@ const router: IRouter = Router();
 type Provider = "openrouter" | "openai";
 
 function getProvider(): Provider {
+  // Explicit OpenRouter key → OpenRouter
   if (process.env.OPENROUTER_API_KEY) return "openrouter";
-  if (process.env.OPENAI_API_KEY)     return "openai";
-  throw new Error("No AI API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY.");
+  const oaiKey = process.env.OPENAI_API_KEY ?? "";
+  if (!oaiKey) throw new Error("No AI API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY.");
+  // OpenRouter keys start with "sk-or-" — detect even if stored in OPENAI_API_KEY
+  if (oaiKey.startsWith("sk-or-")) return "openrouter";
+  return "openai";
 }
 
 function getApiKey(): string {
