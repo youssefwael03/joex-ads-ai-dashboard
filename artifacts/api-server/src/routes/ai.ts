@@ -29,16 +29,11 @@ function getApiKey(): string {
 interface ModelInfo { id: string; name: string; description: string }
 
 const OPENROUTER_MODELS: ModelInfo[] = [
-  { id: "auto",                                          name: "Auto",               description: "Tries all models in order, skips unavailable ones" },
-  { id: "deepseek/deepseek-chat-v3-0324:free",          name: "DeepSeek V3",        description: "Best reasoning & tool use (free)" },
-  { id: "deepseek/deepseek-v4-flash:free",              name: "DeepSeek V4 Flash",  description: "Latest DeepSeek, fast responses (free)" },
-  { id: "deepseek/deepseek-r1:free",                    name: "DeepSeek R1",        description: "Advanced reasoning model (free)" },
-  { id: "google/gemini-2.5-flash-preview-05-20:free",   name: "Gemini 2.5 Flash",   description: "Latest Gemini, fast & multimodal (free)" },
-  { id: "qwen/qwen3-235b-a22b:free",                    name: "Qwen3 235B",         description: "Largest Qwen, powerful (free)" },
-  { id: "qwen/qwen3-32b:free",                          name: "Qwen3 32B",          description: "Strong analytical model (free)" },
-  { id: "meta-llama/llama-3.3-70b-instruct:free",       name: "Llama 3.3 70B",     description: "Open-source powerhouse (free)" },
-  { id: "meta-llama/llama-3.1-8b-instruct:free",        name: "Llama 3.1 8B",      description: "Fast & lightweight (free)" },
-  { id: "mistralai/mistral-7b-instruct:free",            name: "Mistral 7B",        description: "Reliable & fast fallback (free)" },
+  { id: "auto",                                              name: "Auto",                    description: "Tries all models in order, skips unavailable ones" },
+  { id: "deepseek/deepseek-v4-flash:free",                  name: "DeepSeek V4 Flash",       description: "Latest DeepSeek, fast responses (free)" },
+  { id: "qwen/qwen3-next-80b-a3b-instruct:free",            name: "Qwen3 Next 80B",          description: "Next-gen Qwen, powerful (free)" },
+  { id: "qwen/qwen3-coder:free",                            name: "Qwen3 Coder",             description: "Strong analytical & coding model (free)" },
+  { id: "arcee-ai/trinity-large-thinking:free",             name: "Trinity Large Thinking",  description: "Deep thinking & reasoning (free)" },
 ];
 
 const OPENAI_MODELS: ModelInfo[] = [
