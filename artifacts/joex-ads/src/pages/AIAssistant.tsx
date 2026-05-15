@@ -21,6 +21,7 @@ import {
   Database, CheckCircle2, XCircle, Zap, Play, Pause, DollarSign,
   TrendingUp, BarChart3, Globe, Smartphone, Calendar, Users,
   Cpu, Clock, AlertTriangle, ChevronDown, Trash2, FlaskConical,
+  Layers, Search, Target, MessageSquare,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -65,10 +66,12 @@ interface TokenUsage {
   total: number;
 }
 
+type TaskMode = "analyze" | "execute" | "plan" | "chat" | "";
+
 type DisplayItem =
   | { kind: "user"; content: string }
-  | { kind: "assistant"; content: string; toolEvents: ToolEvent[]; model?: string; tokens?: TokenUsage; duration?: number; fallbacks?: string[] }
-  | { kind: "streaming"; content: string; toolEvents: ToolEvent[]; model?: string; fallbacks?: string[] };
+  | { kind: "assistant"; content: string; toolEvents: ToolEvent[]; model?: string; tokens?: TokenUsage; duration?: number; fallbacks?: string[]; mode?: TaskMode }
+  | { kind: "streaming"; content: string; toolEvents: ToolEvent[]; model?: string; fallbacks?: string[]; mode?: TaskMode };
 
 // ── Model display names ────────────────────────────────────────────────────────
 
@@ -87,20 +90,21 @@ function fmtDuration(ms: number): string {
 // ── Suggested prompts ─────────────────────────────────────────────────────────
 
 const SUGGESTED_PROMPTS = [
-  { icon: BarChart3,   label: "Full account audit",  text: "Do a full audit of my account — fetch all campaigns, ad sets, breakdowns by device and country, and tell me exactly what to fix first." },
-  { icon: TrendingUp,  label: "Scale winners",        text: "Fetch all my campaigns and ad sets, identify the top 3 performers by ROAS, and increase their budgets by 20%." },
-  { icon: Pause,       label: "Kill underperformers", text: "Get all campaigns and ad sets, find everything with ROAS below 1.5x after significant spend, and pause them with explanation." },
-  { icon: Globe,       label: "Country breakdown",    text: "Fetch the country breakdown of my spend and ROAS. Which countries are wasting budget and which should I scale?" },
-  { icon: Smartphone,  label: "Device analysis",      text: "Get the device and platform breakdown. Where is my spend going vs where my ROAS is highest? Recommend budget shifts." },
-  { icon: Calendar,    label: "Daily trends",         text: "Fetch my daily performance data for this period. Identify any anomalies, CPM spikes, ROAS drops, and explain what likely caused them." },
-  { icon: Users,       label: "Age & gender",         text: "Get age and gender breakdowns. Which demographic is my best performer? Should I exclude or reduce budget for any segment?" },
-  { icon: Zap,         label: "Quick wins",           text: "Fetch everything — campaigns, adsets, and all breakdowns — then give me the top 5 actions I can take RIGHT NOW for maximum impact." },
+  { icon: BarChart3,        label: "Full audit",            text: "Do a full audit of my account — fetch all campaigns, ad sets, breakdowns by device and country, and tell me exactly what to fix first.", mode: "analyze" as TaskMode },
+  { icon: Zap,              label: "Quick wins",            text: "Fetch everything — campaigns, adsets, and all breakdowns — then give me the top 5 actions I can take RIGHT NOW for maximum impact.", mode: "analyze" as TaskMode },
+  { icon: TrendingUp,       label: "Scale winners",         text: "Fetch all my campaigns and ad sets, identify the top 3 performers by ROAS, and increase their budgets by 20%.", mode: "execute" as TaskMode },
+  { icon: Pause,            label: "Kill underperformers",  text: "Get all campaigns and ad sets, find everything with ROAS below 1.5x after significant spend, and pause them with explanation.", mode: "execute" as TaskMode },
+  { icon: Layers,           label: "Build broad campaign",  text: "Create a broad scaling campaign called 'Broad Scale Test' with 500 daily budget targeting Egypt, paused for review.", mode: "execute" as TaskMode },
+  { icon: Target,           label: "Retargeting campaign",  text: "Create a retargeting campaign called 'Retarget - 7 & 30 Day' with 200 daily budget targeting Egypt, paused.", mode: "execute" as TaskMode },
+  { icon: Globe,            label: "Country breakdown",     text: "Fetch the country breakdown of my spend and ROAS. Which countries are wasting budget and which should I scale?", mode: "analyze" as TaskMode },
+  { icon: Search,           label: "Plan next strategy",    text: "Based on my account data, recommend a complete campaign strategy for the next 30 days — structure, budgets, and priorities.", mode: "plan" as TaskMode },
 ];
 
 // ── Tool icon map ─────────────────────────────────────────────────────────────
 
 function getToolIcon(tool: string, isAction: boolean) {
-  if (tool === "save_account_brain") return BrainCircuit;
+  if (tool === "save_account_brain")        return BrainCircuit;
+  if (tool === "execute_campaign_template") return Layers;
   if (isAction) {
     if (tool.includes("pause"))  return Pause;
     if (tool.includes("enable")) return Play;
@@ -113,6 +117,26 @@ function getToolIcon(tool: string, isAction: boolean) {
   if (tool.includes("overview") || tool.includes("info")) return Database;
   if (tool.includes("ads"))       return Sparkles;
   return Database;
+}
+
+// ── Mode badge ────────────────────────────────────────────────────────────────
+
+const MODE_CONFIG: Record<string, { label: string; color: string }> = {
+  analyze: { label: "Analyze",  color: "border-blue-500/30 text-blue-400 bg-blue-500/10" },
+  execute: { label: "Execute",  color: "border-green-500/30 text-green-400 bg-green-500/10" },
+  plan:    { label: "Plan",     color: "border-violet-500/30 text-violet-400 bg-violet-500/10" },
+  chat:    { label: "Chat",     color: "border-secondary/30 text-secondary bg-secondary/10" },
+};
+
+function ModeBadge({ mode }: { mode?: TaskMode }) {
+  if (!mode || mode === "") return null;
+  const cfg = MODE_CONFIG[mode];
+  if (!cfg) return null;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border uppercase tracking-wider ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
 }
 
 // ── Brain status panel ─────────────────────────────────────────────────────────
@@ -318,6 +342,7 @@ function AssistantBubble({
   tokens,
   duration,
   fallbacks,
+  mode,
 }: {
   content: string;
   toolEvents: ToolEvent[];
@@ -326,6 +351,7 @@ function AssistantBubble({
   tokens?: TokenUsage;
   duration?: number;
   fallbacks?: string[];
+  mode?: TaskMode;
 }) {
   const latestByTool = new Map<string, ToolEvent>();
   for (const e of toolEvents) {
@@ -351,10 +377,15 @@ function AssistantBubble({
         <BrainCircuit className="h-4 w-4 text-secondary" />
       </div>
       <div className="flex-1 min-w-0 space-y-1.5">
-        {/* Fallback notifications */}
-        {fallbackPairs.map((pair, i) => (
-          <FallbackBadge key={i} from={pair.from} to={pair.to} />
-        ))}
+        {/* Mode + fallback row */}
+        {(mode || fallbackPairs.length > 0) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <ModeBadge mode={mode} />
+            {fallbackPairs.map((pair, i) => (
+              <FallbackBadge key={i} from={pair.from} to={pair.to} />
+            ))}
+          </div>
+        )}
 
         {/* Tool events */}
         {displayEvents.length > 0 && (
@@ -544,6 +575,7 @@ export default function AIAssistant() {
         const decoder = new TextDecoder();
         let accText          = "";
         let accModel: string | undefined;
+        let accMode: TaskMode = "";
         const accToolEvents: ToolEvent[] = [];
         const accFallbacks: string[]    = [];
         let toolCounter = 0;
@@ -577,12 +609,13 @@ export default function AIAssistant() {
               // ── Model identified ───────────────────────────────────────────
               if (parsed.type === "model") {
                 accModel = parsed.model;
+                accMode  = parsed.mode ?? "";
                 setCurrentModel(parsed.model ?? "");
                 setDisplayItems((prev) => {
                   const next = [...prev];
                   const last = next[next.length - 1];
                   if (last?.kind === "streaming") {
-                    next[next.length - 1] = { ...last, model: parsed.model };
+                    next[next.length - 1] = { ...last, model: parsed.model, mode: parsed.mode ?? "" };
                   }
                   return next;
                 });
@@ -670,6 +703,7 @@ export default function AIAssistant() {
                   ...prev,
                   { role: "assistant", content: finalText },
                 ]);
+                const finalMode = accMode;
                 setDisplayItems((prev) => {
                   const next    = [...prev];
                   const lastIdx = next.findLastIndex((i) => i.kind === "streaming");
@@ -682,6 +716,7 @@ export default function AIAssistant() {
                       tokens:     finalTokens,
                       duration:   finalDuration,
                       fallbacks:  finalFallbacks,
+                      mode:       finalMode,
                     };
                   }
                   return next;
@@ -892,6 +927,11 @@ export default function AIAssistant() {
                     <div className="flex items-center gap-2 mb-0.5">
                       <Icon className="h-3.5 w-3.5 text-primary/60 group-hover:text-primary transition-colors shrink-0" />
                       <span className="font-medium text-foreground text-xs">{p.label}</span>
+                      {p.mode && MODE_CONFIG[p.mode] && (
+                        <span className={`ml-auto inline-flex items-center px-1 py-px rounded text-[8px] font-bold border uppercase tracking-wider ${MODE_CONFIG[p.mode].color}`}>
+                          {MODE_CONFIG[p.mode].label}
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs leading-relaxed line-clamp-2">{p.text}</span>
                   </motion.button>
@@ -916,6 +956,7 @@ export default function AIAssistant() {
                       tokens={item.tokens}
                       duration={item.duration}
                       fallbacks={item.fallbacks}
+                      mode={item.mode}
                     />
                   );
                 }
@@ -927,6 +968,7 @@ export default function AIAssistant() {
                       toolEvents={item.toolEvents}
                       model={item.model}
                       fallbacks={item.fallbacks}
+                      mode={item.mode}
                       isStreaming
                     />
                   );

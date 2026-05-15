@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, accountBrains } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { getTemplate, listTemplates, buildNamingConvention } from "../templates/campaigns";
 
 const router: IRouter = Router();
 
@@ -401,7 +402,7 @@ async function callAI(
       messages,
       tools:       tools.length > 0 ? tools : undefined,
       tool_choice: tools.length > 0 ? "auto" : undefined,
-      max_tokens:  3000,
+      max_tokens:  1500,
       temperature: 0.3,
     }),
     signal: AbortSignal.timeout(60_000),
@@ -1222,6 +1223,53 @@ const TOOLS: ToolDef[] = [
       required: ["audit_summary"],
     },
   },
+
+  // ── CAMPAIGN TEMPLATE EXECUTOR ───────────────────────────────────────────────
+
+  {
+    name: "execute_campaign_template",
+    description:
+      "Execute a pre-built campaign template. The backend constructs all Meta API payloads deterministically — the AI only provides strategic decisions. Use this instead of manually calling create_campaign + create_adset. Templates: catalog_sales, broad_scaling, retargeting, lead_generation, whatsapp_campaign, advantage_plus, abo_testing, cbo_scaling, creative_testing, evergreen_scaling.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        template: {
+          type: "string",
+          enum: ["catalog_sales", "broad_scaling", "retargeting", "lead_generation", "whatsapp_campaign", "advantage_plus", "abo_testing", "cbo_scaling", "creative_testing", "evergreen_scaling"],
+          description: "Template to execute",
+        },
+        campaign_name: {
+          type: "string",
+          description: "Base name for the campaign (date suffix added automatically)",
+        },
+        budget_daily: {
+          type: "number",
+          description: "Total daily budget in account currency (e.g. 500 = 500 EGP/USD)",
+        },
+        target_countries: {
+          type: "array",
+          items: { type: "string" },
+          description: "ISO country codes (e.g. ['EG', 'SA', 'AE'])",
+        },
+        optimization_goal: {
+          type: "string",
+          description: "Override the template's default optimization goal if needed",
+        },
+        age_min: { type: "number", description: "Minimum age (default: template default)" },
+        age_max: { type: "number", description: "Maximum age (default: template default)" },
+        audience_override: {
+          type: "object",
+          description: "Additional targeting fields to merge (interests, behaviors, custom_audiences, etc.)",
+        },
+        status: {
+          type: "string",
+          enum: ["PAUSED", "ACTIVE"],
+          description: "Initial campaign status (default: PAUSED for safety)",
+        },
+      },
+      required: ["template", "campaign_name", "budget_daily"],
+    },
+  },
 ];
 
 // ── Action tool classification ─────────────────────────────────────────────────
@@ -1240,7 +1288,51 @@ const ACTION_TOOLS = new Set([
   "create_customconversion", "delete_customconversion",
   "delete_catalog_product",
   "save_account_brain",
+  "execute_campaign_template",
 ]);
+
+const READ_TOOL_NAMES = new Set([
+  "get_account_overview", "get_breakdown", "get_daily_insights", "get_account_info",
+  "get_campaigns", "get_adsets", "get_ads", "get_adcreatives", "get_customaudiences",
+  "get_adimages", "get_advideos", "get_adspixels", "get_pixel_stats",
+  "get_adrules", "get_customconversions", "get_productcatalogs", "get_catalog_products",
+]);
+
+// ── Task mode detection ────────────────────────────────────────────────────────
+
+type TaskMode = "analyze" | "execute" | "plan" | "chat";
+
+function detectTaskMode(messages: { role: string; content: string }[]): TaskMode {
+  const last = messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
+  const t = last.toLowerCase();
+  if (/\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy)\b/.test(t)) return "execute";
+  if (/\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend)\b/.test(t)) return "analyze";
+  if (/\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint)\b/.test(t)) return "plan";
+  return "chat";
+}
+
+function getToolsForMode(mode: TaskMode, allTools: object[], hasBrain: boolean): object[] {
+  switch (mode) {
+    case "chat":
+      // Brain context is sufficient — no tools needed
+      return [];
+    case "analyze":
+      return allTools.filter((t: any) =>
+        READ_TOOL_NAMES.has(t.function.name) || t.function.name === "save_account_brain"
+      );
+    case "plan":
+      return allTools.filter((t: any) =>
+        ["get_account_overview", "get_campaigns", "get_adsets", "get_breakdown", "save_account_brain"].includes(t.function.name)
+      );
+    case "execute":
+      return allTools.filter((t: any) =>
+        ACTION_TOOLS.has(t.function.name) ||
+        ["get_campaigns", "get_adsets", "get_customaudiences", "get_adimages", "get_advideos"].includes(t.function.name)
+      );
+    default:
+      return allTools;
+  }
+}
 
 // ── Tool call labels ──────────────────────────────────────────────────────────
 
@@ -1295,7 +1387,8 @@ function toolCallLabel(name: string, input: Record<string, any>): string {
     get_productcatalogs:     () => "Loading all product catalogs…",
     get_catalog_products:    () => `Loading products in catalog ${input.catalog_id}…`,
     delete_catalog_product:  () => `Deleting product ${input.product_name} from catalog…`,
-    save_account_brain:      () => "Saving account intelligence to memory…",
+    save_account_brain:         () => "Saving account intelligence to memory…",
+    execute_campaign_template:  () => `Executing ${String(input.template ?? "").replace(/_/g, " ")} template…`,
   };
   return labels[name]?.() ?? `Running ${name}…`;
 }
@@ -1353,7 +1446,12 @@ function toolDoneLabel(name: string, input: Record<string, any>, result: ToolRes
     get_productcatalogs:     () => count != null ? `${count} catalogs loaded` : "Catalogs loaded",
     get_catalog_products:    () => count != null ? `${count} products loaded` : "Products loaded",
     delete_catalog_product:  () => `Product "${input.product_name}" deleted`,
-    save_account_brain:      () => "Account intelligence saved to memory",
+    save_account_brain:         () => "Account intelligence saved to memory",
+    execute_campaign_template:  () => {
+      const r = result.data as any;
+      if (r?.campaign_id) return `Campaign created (ID: ${r.campaign_id}) — ${r.adsets_created ?? 0} ad set(s) created`;
+      return "Campaign template executed";
+    },
   };
   return doneLabels[name]?.() ?? "Done";
 }
@@ -1856,6 +1954,108 @@ async function executeTool(
         };
       }
 
+      // ── CAMPAIGN TEMPLATE EXECUTOR ─────────────────────────────────────────
+
+      case "execute_campaign_template": {
+        const tmpl = getTemplate(input.template);
+        if (!tmpl) {
+          return { success: false, error: `Unknown template: ${input.template}. Available: ${listTemplates().map(t => t.id).join(", ")}` };
+        }
+        if (!accountId) return { success: false, error: "No account ID — cannot create campaigns" };
+
+        const dailyBudgetCents = String(Math.round(Number(input.budget_daily) * 100));
+        const countries: string[] = Array.isArray(input.target_countries) && input.target_countries.length > 0
+          ? input.target_countries
+          : ["US"];
+        const campaignName = input.campaign_name ?? buildNamingConvention(tmpl, tmpl.name);
+        const status = input.status ?? "PAUSED";
+
+        // Step 1: Create campaign
+        const campaignBody: Record<string, any> = {
+          name: campaignName,
+          objective: tmpl.objective,
+          status,
+          special_ad_categories: tmpl.special_ad_categories,
+        };
+        // CBO templates set budget at campaign level
+        if (tmpl.id === "cbo_scaling") {
+          campaignBody.daily_budget = dailyBudgetCents;
+        }
+
+        const campaignData = await metaPost(`/act_${accountId}/campaigns`, token, campaignBody);
+        if (campaignData.error) {
+          return { success: false, error: `Campaign creation failed: ${campaignData.error.message ?? JSON.stringify(campaignData.error)}` };
+        }
+        const campaignId: string = campaignData.id;
+
+        // Step 2: Create ad sets
+        const adsetIds: string[] = [];
+        const numAdsets = tmpl.num_adsets;
+        const totalBudget = Number(input.budget_daily);
+        const ratios = tmpl.budget_split_ratios;
+
+        for (let i = 0; i < numAdsets; i++) {
+          const adsetName = `${campaignName} | ${tmpl.adset_name_suffixes[i] ?? `AdSet_${i + 1}`}`;
+          const adsetBudget = tmpl.id === "cbo_scaling"
+            ? undefined
+            : Math.round(totalBudget * (ratios[i] ?? 1 / numAdsets) * 100);
+
+          const targeting: Record<string, any> = {
+            geo_locations: { countries },
+            age_min: input.age_min ?? tmpl.targeting_defaults.age_min,
+            age_max: input.age_max ?? tmpl.targeting_defaults.age_max,
+          };
+          if (tmpl.targeting_defaults.genders) targeting.genders = tmpl.targeting_defaults.genders;
+          if (input.audience_override) Object.assign(targeting, input.audience_override);
+
+          const adsetBody: Record<string, any> = {
+            campaign_id: campaignId,
+            name: adsetName,
+            status,
+            billing_event: tmpl.billing_event,
+            optimization_goal: input.optimization_goal ?? tmpl.optimization_goal,
+            targeting: JSON.stringify(targeting),
+          };
+          if (adsetBudget) adsetBody.daily_budget = String(adsetBudget);
+
+          // Manual placements
+          if (tmpl.placement_type === "manual" && tmpl.manual_placements) {
+            adsetBody.targeting = JSON.stringify({
+              ...targeting,
+              publisher_platforms: tmpl.manual_placements.publisher_platforms,
+              facebook_positions:  tmpl.manual_placements.facebook_positions,
+              instagram_positions: tmpl.manual_placements.instagram_positions,
+            });
+          }
+
+          const adsetData = await metaPost(`/act_${accountId}/adsets`, token, adsetBody);
+          if (adsetData.error) {
+            return {
+              success: false,
+              error: `Ad set creation failed (${adsetName}): ${adsetData.error.message ?? JSON.stringify(adsetData.error)}`,
+              data: { campaign_id: campaignId, adsets_created: adsetIds.length },
+            };
+          }
+          adsetIds.push(adsetData.id);
+        }
+
+        return {
+          success: true,
+          data: {
+            campaign_id: campaignId,
+            campaign_name: campaignName,
+            adset_ids: adsetIds,
+            adsets_created: adsetIds.length,
+            template: tmpl.id,
+            status,
+            budget_daily: input.budget_daily,
+            countries,
+            scaling_notes: tmpl.scaling_notes,
+            message: `Template "${tmpl.name}" executed: campaign ${campaignId} + ${adsetIds.length} ad set(s) created as ${status}.`,
+          },
+        };
+      }
+
       default:
         return { success: false, error: `Unknown tool: ${name}` };
     }
@@ -1937,84 +2137,45 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
   const currency = context?.currency ?? "USD";
   const accountName = context?.accountName ?? "this account";
 
+  // Detect task mode first (used in system prompt construction)
+  const taskMode = detectTaskMode(messages);
+
   // Load brain before building system prompt
   const brain = accountId ? await loadBrain(accountId) : null;
   const brainAgeMs  = brain ? Date.now() - brain.updatedAt.getTime() : null;
   const brainFresh  = brainAgeMs !== null && brainAgeMs < 2 * 60 * 60 * 1000; // fresh < 2h
 
-  const brainSection = brain ? `
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ACCOUNT BRAIN (Persistent Memory):
-${formatBrainContext(brain)}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const brainSection = brain
+    ? `\nACCOUNT BRAIN:\n${formatBrainContext(brain)}\n`
+    : "";
 
-MEMORY-FIRST EXECUTION RULES:
-- For follow-up questions about campaigns, ROAS, spend, audiences → answer from brain memory WITHOUT calling tools.
-- For greetings, strategy questions, explanations → respond directly, NO tools.
-- Only re-fetch data if: user explicitly asks for fresh/updated data, brain is stale (>2h old), or user asks about something not in brain.
-- After ANY significant data fetch (audit, campaign load, breakdown) → call save_account_brain to update memory.
-- When building campaigns → use winning campaign patterns from brain memory.
-- Target: under 6k tokens per turn. Avoid redundant fetches.
-` : "";
+  const modeInstruction = taskMode === "execute"
+    ? "MODE: EXECUTE — Use execute_campaign_template for new campaigns. For edits, fetch the campaign/adset ID first, then act. Respond with what was done, not what will be done."
+    : taskMode === "analyze"
+    ? "MODE: ANALYZE — Fetch data, identify patterns, save to brain. Be specific with numbers. No generic advice."
+    : taskMode === "plan"
+    ? "MODE: PLAN — Use brain data first. Only fetch if brain is absent. Return a structured plan with priorities."
+    : "MODE: CHAT — Answer from brain memory only. No tool calls needed.";
 
-  const systemPrompt = `You are JOEX AI — an elite Meta Ads media buyer agent with FULL LIVE ACCESS to the ad account and the ability to execute real actions across the entire Meta Marketing API.
+  const systemPrompt = `You are JOEX AI — an autonomous Meta Ads operating system with full live access to the Meta Marketing API.
 
-ACCOUNT:
-- Name: ${accountName}${accountId ? ` (act_${accountId})` : ""}
-- Currency: ${currency}
-- Date range: ${since || "not set"} → ${until || "not set"}
+ACCOUNT: ${accountName}${accountId ? ` | act_${accountId}` : ""} | ${currency} | ${since || "all time"} → ${until || "today"}
 ${brainSection}
-PERMISSIONS & SCOPES:
-ads_management, ads_read, business_management, pages_manage_ads, pages_read_engagement,
-instagram_basic, instagram_manage_insights, catalog_management, leads_retrieval,
-pages_manage_metadata, instagram_content_publish, pages_manage_posts, pages_show_list,
-read_insights, publish_video
+${modeInstruction}
 
-YOUR CAPABILITIES:
+EXECUTION RULES:
+- ${brain && brainFresh ? "BRAIN FRESH — answer from memory first. Only fetch if user explicitly requests live data." : brain ? "BRAIN STALE (>2h) — refresh key metrics before responding." : "NO BRAIN — after any significant data fetch, call save_account_brain to build memory."}
+- For new campaigns: use execute_campaign_template (deterministic — no manual payload construction).
+- After analysis: always call save_account_brain to persist intelligence.
+- Reference real names, IDs, and numbers. No generic platitudes.
+- DELETE/PAUSE actions: state exactly what you changed and why.
+- Budget changes: state old value → new value.
+- Never say "Let me fetch", "Let me think", "Now I will". Just execute and report results.
+- Token budget: be concise. Lead with the answer, support with evidence.`;
 
-READ TOOLS (fetch live data when brain is absent/stale or fresh data is required):
-- get_account_overview → total spend, ROAS, CTR, CPM, CPC, impressions, reach, purchases
-- get_breakdown → performance by device, platform, country, age, gender
-- get_daily_insights → day-by-day trends
-- get_account_info → balance, billing, account status
-- get_campaigns → all campaigns with full performance metrics
-- get_adsets → all ad sets with budgets, ROAS, frequency
-- get_ads → all ads with creative info and performance
-- get_adcreatives → all creative assets (image, video, copy)
-- get_customaudiences → customer lists, lookalikes, website visitors
-- get_adimages → all uploaded image assets with hashes
-- get_advideos → all uploaded video assets
-- get_adspixels → all Meta Pixels with last-fired times
-- get_pixel_stats → event breakdown for a specific pixel
-- get_adrules → all automated rules with conditions and actions
-- get_customconversions → custom conversion events and stats
-- get_productcatalogs → product catalogs linked to the business
-- get_catalog_products → products inside a specific catalog
-
-ACTION TOOLS (execute real changes — always confirm what you did and why):
-Campaigns:   create_campaign, pause_campaign, enable_campaign, set_campaign_budget, delete_campaign
-Ad Sets:     create_adset, pause_adset, enable_adset, set_adset_budget, delete_adset
-Ads:         create_ad, pause_ad, enable_ad, delete_ad
-Creatives:   create_adcreative, delete_adcreative
-Audiences:   create_customaudience, delete_customaudience
-Images:      upload_adimage_by_url, delete_adimage
-Videos:      delete_advideo
-Pixels:      create_adspixel
-Rules:       create_adrule, enable_adrule, disable_adrule, delete_adrule
-Conversions: create_customconversion, delete_customconversion
-Catalogs:    delete_catalog_product
-Memory:      save_account_brain → compress and persist account intelligence after analysis
-
-OPERATING RULES:
-- ${brain && brainFresh ? "BRAIN IS FRESH — use memory-first. Only call tools if fresh data is explicitly needed." : brain ? "BRAIN IS STALE — consider refreshing with get_account_overview + get_campaigns, then save_account_brain." : "NO BRAIN YET — after fetching data, always call save_account_brain to build persistent memory."}
-- For greetings, general questions, or explanations → respond directly, no tools.
-- For optimization requests: use brain if fresh, else fetch campaigns + adsets + relevant breakdowns.
-- For a full audit: call get_account_overview, get_campaigns, get_adsets, get_daily_insights → then save_account_brain.
-- Reference actual names, IDs, and numbers in every data-driven response.
-- For actions: state exactly what you did and why, citing specific metrics.
-- Prioritize by revenue impact (highest ROI first). Be direct — no generic advice.
-- DELETE operations are irreversible: always confirm the object name and reason.
-- For budget changes: always state the old and new value.`;
+  // Select relevant tool subset for detected mode
+  const allOAITools = accountId ? toOAITools(TOOLS) : [];
+  const oaiTools = getToolsForMode(taskMode, allOAITools, !!brain);
 
   // SSE setup
   res.setHeader("Content-Type", "text/event-stream");
@@ -2031,8 +2192,6 @@ OPERATING RULES:
   };
 
   try {
-    const oaiTools = accountId ? toOAITools(TOOLS) : [];
-
     let currentMessages: OAIMessage[] = [
       { role: "system", content: systemPrompt },
       ...messages.map((m: { role: string; content: string }) => ({
@@ -2047,10 +2206,10 @@ OPERATING RULES:
     const tokensTotal = { prompt: 0, completion: 0, total: 0 };
     const startTime = Date.now();
 
-    emit({ type: "model", model: currentModel });
+    emit({ type: "model", model: currentModel, mode: taskMode });
 
-    // Agentic loop — max 5 iterations
-    for (let iter = 0; iter < 5; iter++) {
+    // Agentic loop — max 3 iterations (token optimization)
+    for (let iter = 0; iter < 3; iter++) {
       let response: OAIResponse | null = null;
 
       // Try fallback chain starting from current model index

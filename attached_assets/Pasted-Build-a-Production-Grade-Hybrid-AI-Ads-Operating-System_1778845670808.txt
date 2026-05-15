@@ -1,0 +1,331 @@
+Build a Production-Grade Hybrid AI Ads Operating System for the Joex Ads Dashboard.
+
+Current status:
+The project already has:
+
+* Persistent Account Brain memory
+* Live Meta API tool execution
+* AI assistant with OpenRouter
+* SSE streaming
+* PostgreSQL memory storage
+* Background intelligence architecture
+
+Now refactor the system into a true AI Ads Operating System optimized for:
+
+* speed
+* low token usage
+* autonomous execution
+* scalable SaaS architecture
+
+---
+
+## MAIN ARCHITECTURE GOAL
+
+Convert the assistant from:
+"dynamic AI tool caller"
+
+Into:
+"Hybrid AI Decision + Deterministic Execution Engine"
+
+The AI should:
+
+* THINK strategically
+* DECIDE intelligently
+* EXECUTE through backend templates and services
+
+NOT generate huge payloads dynamically every time.
+
+---
+
+1. BUILD EXECUTION TEMPLATE ENGINE
+
+---
+
+Create reusable execution templates.
+
+Folder:
+backend/templates/
+
+Template types:
+
+1. Catalog Sales Template
+2. Broad Scaling Template
+3. Retargeting Template
+4. Lead Generation Template
+5. WhatsApp Campaign Template
+6. Advantage+ Template
+7. ABO Testing Template
+8. CBO Scaling Template
+9. Creative Testing Template
+10. Evergreen Scaling Template
+
+Each template should define:
+
+* campaign objective
+* campaign settings
+* budget allocation logic
+* ad set structure
+* placement logic
+* optimization goals
+* naming conventions
+* bid strategy
+* scaling rules
+
+Templates must be executable without AI-generated payloads.
+
+---
+
+2. AI = DECISION ENGINE ONLY
+
+---
+
+The AI should NOT:
+
+* manually construct massive campaign payloads
+* dynamically generate every API field
+* repeatedly fetch Meta structures
+
+Instead:
+AI returns compact strategic decisions.
+
+Example:
+
+{
+"template": "catalog_scaling",
+"budget": 600,
+"targetCountries": ["EG"],
+"bestAudience": "Women 25-44",
+"creativeStyle": "UGC",
+"optimizationGoal": "Purchase"
+}
+
+Then backend executors build the actual Meta payloads.
+
+---
+
+3. BUILD DETERMINISTIC EXECUTORS
+
+---
+
+Create backend execution services:
+
+services/
+
+* campaignExecutor.ts
+* adsetExecutor.ts
+* adsExecutor.ts
+* audienceExecutor.ts
+* creativeExecutor.ts
+
+Executors:
+
+* receive structured AI decisions
+* generate full Meta payloads
+* execute reliably
+* validate required fields
+* handle retries/errors
+
+No hallucinated payloads.
+
+---
+
+4. ACCOUNT BRAIN INTEGRATION
+
+---
+
+Use Account Brain memory first.
+
+Executors should automatically use:
+
+* winning audiences
+* best placements
+* best creatives
+* fatigue thresholds
+* top-performing structures
+* scaling learnings
+
+Without requiring repeated audits.
+
+---
+
+5. BACKGROUND INTELLIGENCE SYNC
+
+---
+
+Create scheduled sync workers.
+
+Every 30–60 minutes:
+
+* refresh KPIs
+* detect fatigue
+* detect winners
+* detect anomalies
+* refresh Account Brain
+* summarize new learnings
+
+Without user interaction.
+
+---
+
+6. TOKEN OPTIMIZATION
+
+---
+
+Current token usage is too high.
+
+Target:
+
+* under 8k tokens per task
+* under 15 seconds execution time
+
+Implement:
+
+* compressed memory summaries
+* compact prompts
+* tool minimization
+* hidden reasoning
+* no verbose chain-of-thought
+* no repetitive fetch loops
+
+---
+
+7. REMOVE REASONING SPAM
+
+---
+
+The user should NEVER see:
+
+* "Let me fetch..."
+* "Let me think..."
+* "Now I will..."
+* internal planning loops
+
+Instead show clean execution states:
+
+✓ Brain loaded
+✓ Audience selected
+✓ Campaign created
+✓ Ad sets created
+✓ Ads created
+
+---
+
+8. SMART EXECUTION MODES
+
+---
+
+Create modes:
+
+1. ANALYZE
+
+* audits
+* recommendations
+* insights
+
+2. PLAN
+
+* strategy generation
+* structure recommendations
+
+3. EXECUTE
+
+* actual Meta actions
+
+Never mix modes automatically.
+
+---
+
+9. SMART TOOL EXPOSURE
+
+---
+
+Only expose tools relevant to the current task.
+
+Example:
+If task = "create campaign"
+Do NOT expose:
+
+* lead tools
+* delete tools
+* unrelated analytics tools
+
+Implement dynamic tool selection.
+
+---
+
+10. ADD CAMPAIGN OPERATING SYSTEM
+
+---
+
+Build reusable campaign operating logic.
+
+Examples:
+
+* auto budget splitting
+* automatic naming systems
+* scaling triggers
+* fatigue alerts
+* pause rules
+* ROAS thresholds
+* winner duplication logic
+
+---
+
+11. ADD PERFORMANCE LAYER
+
+---
+
+Track:
+
+* token usage
+* model usage
+* execution duration
+* tool calls
+* API latency
+* AI cost estimates
+
+Show lightweight stats in UI.
+
+---
+
+12. ADD FAILSAFE SYSTEM
+
+---
+
+If AI fails:
+
+* executors still work
+* templates still execute
+* retries happen automatically
+* fallback models activate
+
+---
+
+13. OPENROUTER OPTIMIZATION
+
+---
+
+Use:
+
+* deepseek/deepseek-chat-v3-0324:free
+* google/gemini-2.0-flash-exp:free
+* qwen/qwen3-32b:free
+
+Implement automatic fallback rotation.
+
+Reduce:
+
+* max loops → 2
+* max_tokens → 1500
+
+---
+
+14. FINAL GOAL
+
+---
+
+The final system should behave like:
+
+"An autonomous AI media buyer with persistent memory, deterministic execution, and live Meta operational control."
+
+NOT a generic chatbot.
