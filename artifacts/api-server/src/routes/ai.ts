@@ -277,8 +277,8 @@ async function fetchFreeModelsFromOpenRouter(): Promise<ModelInfo[]> {
     // Sort by context length descending (bigger = more capable)
     free.sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0));
 
-    const models: ModelInfo[] = [
-      { id: "auto",          name: "Auto",        description: "Tries all free models in order, skips unavailable ones" },
+    const rawModels: ModelInfo[] = [
+      { id: "auto",            name: "Auto",        description: "Tries all free models in order, skips unavailable ones" },
       { id: "openrouter/free", name: "Free Router", description: "OpenRouter picks the best available free model automatically" },
       ...free.map((m) => ({
         id:          m.id,
@@ -286,6 +286,9 @@ async function fetchFreeModelsFromOpenRouter(): Promise<ModelInfo[]> {
         description: `Free · ${((m.context_length ?? 0) / 1000).toFixed(0)}K ctx`,
       })),
     ];
+    // Deduplicate by id (openrouter/free may appear in both static and dynamic lists)
+    const seen = new Set<string>();
+    const models = rawModels.filter((m) => !seen.has(m.id) && seen.add(m.id));
 
     _openrouterCache = { models, fetchedAt: now };
     return models;
