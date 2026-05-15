@@ -1,0 +1,190 @@
+Refactor the AI assistant into a persistent AI Media Buyer Agent with memory and account intelligence.
+
+Current issue:
+The assistant is stateless.
+
+On every request it:
+
+* refetches campaigns
+* reruns audits
+* reloads catalogs
+* repeats analysis
+* wastes massive tokens
+
+I want a persistent intelligent agent architecture.
+
+---
+
+## MAIN GOAL
+
+The AI should remember the account.
+
+After one audit:
+
+* it should retain account intelligence
+* reuse insights
+* understand winning patterns
+* build campaigns from memory
+* minimize repeated Meta API calls
+
+---
+
+1. CREATE ACCOUNT MEMORY SYSTEM
+
+---
+
+Build persistent memory layer.
+
+Store:
+
+* winning campaigns
+* best audiences
+* best creatives
+* top products
+* best placements
+* best countries
+* fatigue thresholds
+* scaling patterns
+* best ROAS structures
+* campaign learnings
+* creative learnings
+* historical summaries
+
+---
+
+2. CREATE ACCOUNT BRAIN
+
+---
+
+Each ad account should have:
+
+AccountBrain {
+accountId
+auditSummary
+audienceInsights
+creativeInsights
+scalingInsights
+productInsights
+historicalPerformance
+recommendations
+lastUpdated
+}
+
+---
+
+3. MEMORY-FIRST EXECUTION
+
+---
+
+When user says:
+"Build a campaign with 600 EGP/day"
+
+The AI should:
+
+* use stored intelligence first
+* avoid full audit reruns
+* avoid fetching all campaigns again
+* execute directly
+
+---
+
+4. INCREMENTAL REFRESH
+
+---
+
+Do NOT reload the entire account every request.
+
+Instead:
+
+* fetch only recent changes
+* fetch last 7 days
+* fetch only updated campaigns
+* refresh KPIs incrementally
+
+---
+
+5. BACKGROUND SYNC SYSTEM
+
+---
+
+Create scheduled intelligence sync.
+
+Every X minutes:
+
+* refresh KPIs
+* detect fatigue
+* update winners
+* update alerts
+* update trends
+
+Without user interaction.
+
+---
+
+6. COMPRESSED CONTEXT SYSTEM
+
+---
+
+Do NOT send raw Meta payloads into AI context.
+
+Instead generate compact summaries:
+
+{
+"bestAudience": "...",
+"topProducts": [...],
+"winningCreativeType": "...",
+"avgROAS": 3.7
+}
+
+Use compressed intelligence memory.
+
+---
+
+7. REDUCE TOKEN USAGE
+
+---
+
+Target:
+
+* under 8k tokens per request
+* avoid repeated audits
+* avoid repeated reasoning loops
+
+---
+
+8. EXECUTION ENGINE
+
+---
+
+The AI should behave like:
+
+* an autonomous media buyer
+* not a generic chatbot
+
+Capabilities:
+
+* create campaigns
+* build ad sets
+* generate targeting
+* create scaling structures
+* optimize budgets
+* detect fatigue
+* suggest creative angles
+
+Using account memory + live Meta API execution.
+
+---
+
+9. IMPORTANT
+
+---
+
+Preserve:
+
+* live Meta API access
+* SSE streaming
+* assistant UI
+* tool execution
+
+But redesign the architecture around:
+MEMORY + ACCOUNT INTELLIGENCE + INCREMENTAL EXECUTION

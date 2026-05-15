@@ -1,6 +1,160 @@
 import { Router, type IRouter } from "express";
+import { db, accountBrains } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
+
+// ── Account Brain ─────────────────────────────────────────────────────────────
+
+interface BrainData {
+  auditSummary?: string;
+  kpiSnapshot?: Record<string, any>;
+  winningCampaigns?: any[];
+  losingCampaigns?: any[];
+  audienceInsights?: Record<string, any>;
+  creativeInsights?: Record<string, any>;
+  scalingInsights?: Record<string, any>;
+  recommendations?: any[];
+  fatigueInfo?: Record<string, any>;
+  lastDateRange?: string;
+}
+
+type BrainRow = BrainData & { updatedAt: Date };
+
+async function loadBrain(accountId: string): Promise<BrainRow | null> {
+  try {
+    const rows = await db.select().from(accountBrains)
+      .where(eq(accountBrains.accountId, accountId))
+      .limit(1);
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      auditSummary:     r.auditSummary      ?? undefined,
+      kpiSnapshot:      r.kpiSnapshot       as Record<string, any> ?? undefined,
+      winningCampaigns: r.winningCampaigns  as any[]               ?? undefined,
+      losingCampaigns:  r.losingCampaigns   as any[]               ?? undefined,
+      audienceInsights: r.audienceInsights  as Record<string, any> ?? undefined,
+      creativeInsights: r.creativeInsights  as Record<string, any> ?? undefined,
+      scalingInsights:  r.scalingInsights   as Record<string, any> ?? undefined,
+      recommendations:  r.recommendations   as any[]               ?? undefined,
+      fatigueInfo:      r.fatigueInfo       as Record<string, any> ?? undefined,
+      lastDateRange:    r.lastDateRange      ?? undefined,
+      updatedAt:        r.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveBrain(accountId: string, data: BrainData): Promise<void> {
+  try {
+    await db.insert(accountBrains).values({
+      accountId,
+      auditSummary:     data.auditSummary,
+      kpiSnapshot:      data.kpiSnapshot,
+      winningCampaigns: data.winningCampaigns,
+      losingCampaigns:  data.losingCampaigns,
+      audienceInsights: data.audienceInsights,
+      creativeInsights: data.creativeInsights,
+      scalingInsights:  data.scalingInsights,
+      recommendations:  data.recommendations,
+      fatigueInfo:      data.fatigueInfo,
+      lastDateRange:    data.lastDateRange,
+      updatedAt:        new Date(),
+    }).onConflictDoUpdate({
+      target: accountBrains.accountId,
+      set: {
+        auditSummary:     data.auditSummary,
+        kpiSnapshot:      data.kpiSnapshot,
+        winningCampaigns: data.winningCampaigns,
+        losingCampaigns:  data.losingCampaigns,
+        audienceInsights: data.audienceInsights,
+        creativeInsights: data.creativeInsights,
+        scalingInsights:  data.scalingInsights,
+        recommendations:  data.recommendations,
+        fatigueInfo:      data.fatigueInfo,
+        lastDateRange:    data.lastDateRange,
+        updatedAt:        new Date(),
+      },
+    });
+  } catch { /* brain save failure is non-fatal */ }
+}
+
+async function clearBrain(accountId: string): Promise<void> {
+  try {
+    await db.delete(accountBrains).where(eq(accountBrains.accountId, accountId));
+  } catch { }
+}
+
+function formatBrainContext(brain: BrainRow): string {
+  const ageMs  = Date.now() - brain.updatedAt.getTime();
+  const ageMin = Math.round(ageMs / 60_000);
+  const ageStr = ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`;
+
+  const lines: string[] = [`ACCOUNT BRAIN — last synced: ${ageStr}`];
+
+  if (brain.kpiSnapshot) {
+    const k = brain.kpiSnapshot as Record<string, any>;
+    const parts = [
+      k.spend       ? `Spend: ${k.spend}`       : null,
+      k.roas        ? `ROAS: ${k.roas}x`        : null,
+      k.ctr         ? `CTR: ${k.ctr}%`          : null,
+      k.cpm         ? `CPM: ${k.cpm}`           : null,
+      k.purchases   ? `Purchases: ${k.purchases}` : null,
+    ].filter(Boolean);
+    if (parts.length) lines.push(`KPIs: ${parts.join(' | ')}`);
+  }
+
+  if (brain.auditSummary) lines.push(`Summary: ${brain.auditSummary}`);
+
+  if (Array.isArray(brain.winningCampaigns) && brain.winningCampaigns.length > 0) {
+    const winners = brain.winningCampaigns.slice(0, 5)
+      .map((c: any) => `${c.name}(ROAS:${c.roas}x)`)
+      .join(', ');
+    lines.push(`Winners: ${winners}`);
+  }
+
+  if (Array.isArray(brain.losingCampaigns) && brain.losingCampaigns.length > 0) {
+    const losers = brain.losingCampaigns.slice(0, 3)
+      .map((c: any) => `${c.name}(${c.issue ?? 'low ROAS'})`)
+      .join(', ');
+    lines.push(`Underperformers: ${losers}`);
+  }
+
+  if (brain.audienceInsights) {
+    const a = brain.audienceInsights as Record<string, any>;
+    const parts = [
+      a.bestAudience ? `Audience: ${a.bestAudience}` : null,
+      a.bestCountry  ? `Country: ${a.bestCountry}`   : null,
+      a.bestDevice   ? `Device: ${a.bestDevice}`     : null,
+      a.bestAge      ? `Age: ${a.bestAge}`            : null,
+    ].filter(Boolean);
+    if (parts.length) lines.push(`Top Segments: ${parts.join(' | ')}`);
+  }
+
+  if (brain.creativeInsights) {
+    const c = brain.creativeInsights as Record<string, any>;
+    if (c.winningCreativeType) lines.push(`Best Creative: ${c.winningCreativeType}`);
+    if (c.topHook) lines.push(`Top Hook: ${c.topHook}`);
+  }
+
+  if (brain.fatigueInfo) {
+    const f = brain.fatigueInfo as Record<string, any>;
+    if (f.fatiguedAdsets)    lines.push(`Fatigued Ad Sets: ${f.fatiguedAdsets} (freq > threshold)`);
+    if (f.avgFrequency)      lines.push(`Avg Frequency: ${f.avgFrequency}`);
+  }
+
+  if (Array.isArray(brain.recommendations) && brain.recommendations.length > 0) {
+    const recs = brain.recommendations.slice(0, 3)
+      .map((r: any, i: number) => `${i + 1}. ${r.action ?? r}`)
+      .join(' | ');
+    lines.push(`Priority Actions: ${recs}`);
+  }
+
+  if (brain.lastDateRange) lines.push(`Analysis period: ${brain.lastDateRange}`);
+
+  return lines.join('\n');
+}
 
 // ── Provider detection ────────────────────────────────────────────────────────
 // Priority: OPENROUTER_API_KEY → OpenRouter (free models)
@@ -1008,6 +1162,63 @@ const TOOLS: ToolDef[] = [
       required: ["catalog_id", "product_id", "product_name"],
     },
   },
+
+  // ── ACCOUNT BRAIN ────────────────────────────────────────────────────────────
+
+  {
+    name: "save_account_brain",
+    description:
+      "Save compressed account intelligence to persistent memory. Call this after completing ANY significant data fetch, audit, or analysis. This enables memory-first execution on future requests — the AI will use this stored intelligence instead of re-fetching everything. Always call this after: full audits, campaign analysis, breakdown analysis, or any session where you've learned about the account's performance patterns.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        audit_summary: {
+          type: "string",
+          description: "1–2 sentence account summary: total spend, ROAS, main issues, overall health",
+        },
+        kpi_snapshot: {
+          type: "object",
+          description: "Key metrics object: { spend, roas, ctr, cpm, cpc, impressions, purchases, leads, reach }",
+        },
+        winning_campaigns: {
+          type: "array",
+          items: { type: "object" },
+          description: "Top performing campaigns: [{ id, name, roas, spend, objective, status }]",
+        },
+        losing_campaigns: {
+          type: "array",
+          items: { type: "object" },
+          description: "Underperforming campaigns: [{ id, name, roas, spend, issue }]",
+        },
+        audience_insights: {
+          type: "object",
+          description: "Best segments: { bestAudience, bestCountry, bestDevice, bestAge, bestGender, worstCountry }",
+        },
+        creative_insights: {
+          type: "object",
+          description: "Creative learnings: { winningCreativeType, topHook, avgCTR, fatigueSignals, bestFormat }",
+        },
+        scaling_insights: {
+          type: "object",
+          description: "Scaling patterns: { maxDailyBudget, bestScalingStructure, roasAtScale, recommendedBidStrategy }",
+        },
+        recommendations: {
+          type: "array",
+          items: { type: "object" },
+          description: "Priority action list: [{ priority: 1|2|3, action: string, expectedImpact: string }]",
+        },
+        fatigue_info: {
+          type: "object",
+          description: "Fatigue data: { fatiguedAdsets: number, avgFrequency, fatiguedCampaigns: number, fatigueThreshold }",
+        },
+        last_date_range: {
+          type: "string",
+          description: "Date range this analysis covers (e.g. '2025-05-01 to 2025-05-14')",
+        },
+      },
+      required: ["audit_summary"],
+    },
+  },
 ];
 
 // ── Action tool classification ─────────────────────────────────────────────────
@@ -1025,6 +1236,7 @@ const ACTION_TOOLS = new Set([
   "create_adrule", "enable_adrule", "disable_adrule", "delete_adrule",
   "create_customconversion", "delete_customconversion",
   "delete_catalog_product",
+  "save_account_brain",
 ]);
 
 // ── Tool call labels ──────────────────────────────────────────────────────────
@@ -1080,6 +1292,7 @@ function toolCallLabel(name: string, input: Record<string, any>): string {
     get_productcatalogs:     () => "Loading all product catalogs…",
     get_catalog_products:    () => `Loading products in catalog ${input.catalog_id}…`,
     delete_catalog_product:  () => `Deleting product ${input.product_name} from catalog…`,
+    save_account_brain:      () => "Saving account intelligence to memory…",
   };
   return labels[name]?.() ?? `Running ${name}…`;
 }
@@ -1137,6 +1350,7 @@ function toolDoneLabel(name: string, input: Record<string, any>, result: ToolRes
     get_productcatalogs:     () => count != null ? `${count} catalogs loaded` : "Catalogs loaded",
     get_catalog_products:    () => count != null ? `${count} products loaded` : "Products loaded",
     delete_catalog_product:  () => `Product "${input.product_name}" deleted`,
+    save_account_brain:      () => "Account intelligence saved to memory",
   };
   return doneLabels[name]?.() ?? "Done";
 }
@@ -1619,6 +1833,26 @@ async function executeTool(
         return { success: true, data: { message: `Deleted product ${input.product_name}` } };
       }
 
+      case "save_account_brain": {
+        if (!accountId) return { success: false, error: "No account ID — cannot save brain" };
+        await saveBrain(accountId, {
+          auditSummary:     input.audit_summary,
+          kpiSnapshot:      input.kpi_snapshot,
+          winningCampaigns: input.winning_campaigns,
+          losingCampaigns:  input.losing_campaigns,
+          audienceInsights: input.audience_insights,
+          creativeInsights: input.creative_insights,
+          scalingInsights:  input.scaling_insights,
+          recommendations:  input.recommendations,
+          fatigueInfo:      input.fatigue_info,
+          lastDateRange:    input.last_date_range,
+        });
+        return {
+          success: true,
+          data: { message: "Account intelligence saved. I now remember this account and can answer follow-up questions without re-fetching data." },
+        };
+      }
+
       default:
         return { success: false, error: `Unknown tool: ${name}` };
     }
@@ -1635,6 +1869,22 @@ function trimData(data: unknown, maxItems = 80): unknown {
   }
   return data;
 }
+
+// ── Brain REST endpoints ───────────────────────────────────────────────────────
+
+router.get("/ai/brain/:accountId", async (req, res): Promise<void> => {
+  const accountId = String(req.params.accountId).replace(/^act_/, "");
+  const brain = await loadBrain(accountId);
+  res.json({ brain: brain ?? null });
+});
+
+router.delete("/ai/brain/:accountId", async (req, res): Promise<void> => {
+  const rawToken = req.headers["x-meta-token"];
+  if (!rawToken) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const accountId = String(req.params.accountId).replace(/^act_/, "");
+  await clearBrain(accountId);
+  res.json({ success: true });
+});
 
 // ── Models endpoint ───────────────────────────────────────────────────────────
 
@@ -1684,13 +1934,33 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
   const currency = context?.currency ?? "USD";
   const accountName = context?.accountName ?? "this account";
 
-  const systemPrompt = `You are JOEX AI — an elite Meta Ads AI agent with FULL LIVE ACCESS to the ad account data and the ability to execute real actions across the entire Meta Marketing API.
+  // Load brain before building system prompt
+  const brain = accountId ? await loadBrain(accountId) : null;
+  const brainAgeMs  = brain ? Date.now() - brain.updatedAt.getTime() : null;
+  const brainFresh  = brainAgeMs !== null && brainAgeMs < 2 * 60 * 60 * 1000; // fresh < 2h
+
+  const brainSection = brain ? `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACCOUNT BRAIN (Persistent Memory):
+${formatBrainContext(brain)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MEMORY-FIRST EXECUTION RULES:
+- For follow-up questions about campaigns, ROAS, spend, audiences → answer from brain memory WITHOUT calling tools.
+- For greetings, strategy questions, explanations → respond directly, NO tools.
+- Only re-fetch data if: user explicitly asks for fresh/updated data, brain is stale (>2h old), or user asks about something not in brain.
+- After ANY significant data fetch (audit, campaign load, breakdown) → call save_account_brain to update memory.
+- When building campaigns → use winning campaign patterns from brain memory.
+- Target: under 6k tokens per turn. Avoid redundant fetches.
+` : "";
+
+  const systemPrompt = `You are JOEX AI — an elite Meta Ads media buyer agent with FULL LIVE ACCESS to the ad account and the ability to execute real actions across the entire Meta Marketing API.
 
 ACCOUNT:
 - Name: ${accountName}${accountId ? ` (act_${accountId})` : ""}
 - Currency: ${currency}
 - Date range: ${since || "not set"} → ${until || "not set"}
-
+${brainSection}
 PERMISSIONS & SCOPES:
 ads_management, ads_read, business_management, pages_manage_ads, pages_read_engagement,
 instagram_basic, instagram_manage_insights, catalog_management, leads_retrieval,
@@ -1699,7 +1969,7 @@ read_insights, publish_video
 
 YOUR CAPABILITIES:
 
-READ TOOLS (always fetch fresh data before recommending):
+READ TOOLS (fetch live data when brain is absent/stale or fresh data is required):
 - get_account_overview → total spend, ROAS, CTR, CPM, CPC, impressions, reach, purchases
 - get_breakdown → performance by device, platform, country, age, gender
 - get_daily_insights → day-by-day trends
@@ -1730,17 +2000,18 @@ Pixels:      create_adspixel
 Rules:       create_adrule, enable_adrule, disable_adrule, delete_adrule
 Conversions: create_customconversion, delete_customconversion
 Catalogs:    delete_catalog_product
+Memory:      save_account_brain → compress and persist account intelligence after analysis
 
 OPERATING RULES:
-- Only call tools when the user's request requires data (analysis, optimization, actions, audits). For greetings, general questions, or explanations — respond directly without calling any tools.
-- For optimization requests: fetch campaigns + adsets + relevant breakdowns first
-- For a full audit request: call get_account_overview, get_campaigns, get_adsets, get_daily_insights
-- Reference actual names, IDs, and numbers from the data in every response that uses data
-- For actions: state exactly what you did and why, citing specific metrics
-- Prioritize by revenue impact (highest ROI first)
-- Be direct and specific — no generic advice
-- DELETE operations are irreversible: always confirm the object name and reason
-- For budget changes: always state the old and new value`;
+- ${brain && brainFresh ? "BRAIN IS FRESH — use memory-first. Only call tools if fresh data is explicitly needed." : brain ? "BRAIN IS STALE — consider refreshing with get_account_overview + get_campaigns, then save_account_brain." : "NO BRAIN YET — after fetching data, always call save_account_brain to build persistent memory."}
+- For greetings, general questions, or explanations → respond directly, no tools.
+- For optimization requests: use brain if fresh, else fetch campaigns + adsets + relevant breakdowns.
+- For a full audit: call get_account_overview, get_campaigns, get_adsets, get_daily_insights → then save_account_brain.
+- Reference actual names, IDs, and numbers in every data-driven response.
+- For actions: state exactly what you did and why, citing specific metrics.
+- Prioritize by revenue impact (highest ROI first). Be direct — no generic advice.
+- DELETE operations are irreversible: always confirm the object name and reason.
+- For budget changes: always state the old and new value.`;
 
   // SSE setup
   res.setHeader("Content-Type", "text/event-stream");

@@ -20,7 +20,7 @@ import {
   BrainCircuit, Send, User, Sparkles, Loader2, RotateCcw,
   Database, CheckCircle2, XCircle, Zap, Play, Pause, DollarSign,
   TrendingUp, BarChart3, Globe, Smartphone, Calendar, Users,
-  Cpu, Clock, AlertTriangle, ChevronDown,
+  Cpu, Clock, AlertTriangle, ChevronDown, Trash2, FlaskConical,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,6 +34,18 @@ interface ModelInfo {
 interface ApiMessage {
   role: "user" | "assistant";
   content: string;
+}
+
+interface BrainData {
+  auditSummary?: string;
+  kpiSnapshot?: Record<string, any>;
+  winningCampaigns?: any[];
+  losingCampaigns?: any[];
+  audienceInsights?: Record<string, any>;
+  recommendations?: any[];
+  fatigueInfo?: Record<string, any>;
+  lastDateRange?: string;
+  updatedAt?: string;
 }
 
 interface ToolEvent {
@@ -88,6 +100,7 @@ const SUGGESTED_PROMPTS = [
 // ── Tool icon map ─────────────────────────────────────────────────────────────
 
 function getToolIcon(tool: string, isAction: boolean) {
+  if (tool === "save_account_brain") return BrainCircuit;
   if (isAction) {
     if (tool.includes("pause"))  return Pause;
     if (tool.includes("enable")) return Play;
@@ -100,6 +113,101 @@ function getToolIcon(tool: string, isAction: boolean) {
   if (tool.includes("overview") || tool.includes("info")) return Database;
   if (tool.includes("ads"))       return Sparkles;
   return Database;
+}
+
+// ── Brain status panel ─────────────────────────────────────────────────────────
+
+function BrainPanel({
+  brain,
+  onClear,
+  isClearing,
+}: {
+  brain: BrainData | null;
+  onClear: () => void;
+  isClearing: boolean;
+}) {
+  if (!brain) return null;
+
+  const ageMs  = brain.updatedAt ? Date.now() - new Date(brain.updatedAt).getTime() : null;
+  const ageMin = ageMs !== null ? Math.round(ageMs / 60_000) : null;
+  const ageStr = ageMin === null ? "–" : ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`;
+  const isFresh = ageMin !== null && ageMin < 120;
+
+  const kpi = brain.kpiSnapshot as Record<string, any> | undefined;
+  const winners = Array.isArray(brain.winningCampaigns) ? brain.winningCampaigns.slice(0, 2) : [];
+  const recs    = Array.isArray(brain.recommendations)  ? brain.recommendations.slice(0, 2)  : [];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      className="mb-3 rounded-xl border bg-card/30 border-secondary/20 overflow-hidden"
+    >
+      <div className="px-3 py-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <BrainCircuit className={`h-3.5 w-3.5 shrink-0 ${isFresh ? "text-secondary" : "text-muted-foreground"}`} />
+          <span className="text-xs font-medium text-foreground">Account Brain</span>
+          <Badge
+            variant="outline"
+            className={`text-[10px] h-4 px-1.5 ${isFresh ? "border-secondary/30 text-secondary" : "border-yellow-500/30 text-yellow-400"}`}
+          >
+            {isFresh ? "Trained" : "Stale"}
+          </Badge>
+          <span className="text-[10px] text-muted-foreground/50">{ageStr}</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClear}
+          disabled={isClearing}
+          className="h-5 px-2 text-[10px] text-muted-foreground hover:text-destructive"
+        >
+          {isClearing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Trash2 className="h-2.5 w-2.5" />}
+        </Button>
+      </div>
+
+      {/* KPI strip */}
+      {kpi && (
+        <div className="px-3 pb-1.5 flex flex-wrap gap-2">
+          {kpi.spend     && <span className="text-[10px] text-muted-foreground">Spend: <span className="text-foreground font-medium">{kpi.spend}</span></span>}
+          {kpi.roas      && <span className="text-[10px] text-muted-foreground">ROAS: <span className="text-green-400 font-medium">{kpi.roas}x</span></span>}
+          {kpi.ctr       && <span className="text-[10px] text-muted-foreground">CTR: <span className="text-foreground font-medium">{kpi.ctr}%</span></span>}
+          {kpi.cpm       && <span className="text-[10px] text-muted-foreground">CPM: <span className="text-foreground font-medium">{kpi.cpm}</span></span>}
+          {kpi.purchases && <span className="text-[10px] text-muted-foreground">Purchases: <span className="text-foreground font-medium">{kpi.purchases}</span></span>}
+        </div>
+      )}
+
+      {/* Summary */}
+      {brain.auditSummary && (
+        <div className="px-3 pb-1.5">
+          <p className="text-[10px] text-muted-foreground line-clamp-1">{brain.auditSummary}</p>
+        </div>
+      )}
+
+      {/* Winners + recs row */}
+      {(winners.length > 0 || recs.length > 0) && (
+        <div className="px-3 pb-2 flex gap-4 flex-wrap">
+          {winners.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <TrendingUp className="h-2.5 w-2.5 text-green-400 shrink-0" />
+              {winners.map((w: any, i: number) => (
+                <span key={i} className="text-[10px] text-green-400">{w.name || w}{i < winners.length - 1 ? "," : ""}</span>
+              ))}
+            </div>
+          )}
+          {recs.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <Zap className="h-2.5 w-2.5 text-primary/70 shrink-0" />
+              {recs.map((r: any, i: number) => (
+                <span key={i} className="text-[10px] text-muted-foreground">{r.action || r}{i < recs.length - 1 ? " ·" : ""}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </motion.div>
+  );
 }
 
 // ── Tool event row ────────────────────────────────────────────────────────────
@@ -329,9 +437,37 @@ export default function AIAssistant() {
   const [models,         setModels]         = useState<ModelInfo[]>([]);
   const [selectedModel,  setSelectedModel]  = useState<string>("auto");
   const [provider,       setProvider]       = useState<string>("");
+  const [brain,          setBrain]          = useState<BrainData | null>(null);
+  const [isClearing,     setIsClearing]     = useState(false);
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fetch brain for the selected account
+  const fetchBrain = useCallback(async (accountId: string) => {
+    try {
+      const res = await fetch(`/api/ai/brain/${accountId}`);
+      if (!res.ok) return;
+      const d = await res.json() as { brain: BrainData | null };
+      setBrain(d.brain ?? null);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  // Clear (forget) brain for the selected account
+  const handleClearBrain = useCallback(async () => {
+    if (!selectedAccountId || isClearing) return;
+    setIsClearing(true);
+    try {
+      const token = localStorage.getItem("joex_ads_token");
+      await fetch(`/api/ai/brain/${selectedAccountId}`, {
+        method: "DELETE",
+        headers: token ? { "X-Meta-Token": token } : {},
+      });
+      setBrain(null);
+    } catch { /* non-fatal */ } finally {
+      setIsClearing(false);
+    }
+  }, [selectedAccountId, isClearing]);
 
   // Fetch available models from backend
   useEffect(() => {
@@ -346,6 +482,15 @@ export default function AIAssistant() {
       })
       .catch(() => {});
   }, []);
+
+  // Load brain whenever selected account changes
+  useEffect(() => {
+    if (selectedAccountId) {
+      fetchBrain(selectedAccountId);
+    } else {
+      setBrain(null);
+    }
+  }, [selectedAccountId, fetchBrain]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -541,6 +686,14 @@ export default function AIAssistant() {
                   }
                   return next;
                 });
+
+                // Refresh brain if AI may have called save_account_brain
+                const brainSaved = finalToolEvents.some(
+                  (e) => e.tool === "save_account_brain" && e.type === "tool_done" && e.success !== false,
+                );
+                if (brainSaved && selectedAccountId) {
+                  fetchBrain(selectedAccountId);
+                }
               }
 
               // ── Error ──────────────────────────────────────────────────────
@@ -567,7 +720,7 @@ export default function AIAssistant() {
         textareaRef.current?.focus();
       }
     },
-    [apiMessages, isLoading, selectedAccountId, selectedAccountName, currency, since, until, selectedModel],
+    [apiMessages, isLoading, selectedAccountId, selectedAccountName, currency, since, until, selectedModel, fetchBrain],
   );
 
   const clearChat = () => {
@@ -679,6 +832,13 @@ export default function AIAssistant() {
         </div>
       </div>
 
+      {/* ── Brain panel ───────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {brain && hasAccount && (
+          <BrainPanel brain={brain} onClear={handleClearBrain} isClearing={isClearing} />
+        )}
+      </AnimatePresence>
+
       {/* ── Chat area ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto min-h-0 pr-1">
         {isEmpty ? (
@@ -693,18 +853,26 @@ export default function AIAssistant() {
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-semibold text-foreground">
-                  {hasAccount ? "Full account access ready" : "Ask your AI media buyer anything"}
+                  {hasAccount
+                    ? brain ? "Account brain trained — memory-first mode" : "Full account access ready"
+                    : "Ask your AI media buyer anything"}
                 </h3>
                 <p className="text-muted-foreground text-xs sm:text-sm mt-1 max-w-md px-4">
                   {hasAccount
-                    ? `Connected to ${selectedAccountName || "your account"} (${currency}). I can fetch live data, analyze every campaign and ad set, and execute actions directly.`
+                    ? brain
+                      ? `I remember ${selectedAccountName || "your account"}. I'll answer from memory and only fetch fresh data when needed.`
+                      : `Connected to ${selectedAccountName || "your account"} (${currency}). Run a full audit and I'll save the intelligence for faster future responses.`
                     : "Select an ad account from the top bar to enable full data access and actions."}
                 </p>
               </div>
-              {/* Model chain info */}
+              {/* Brain / model info */}
               <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/40">
+                {brain
+                  ? <><BrainCircuit className="h-3 w-3 text-secondary/60" /><span className="text-secondary/60">Memory active</span><span className="mx-1">·</span></>
+                  : <><FlaskConical className="h-3 w-3" /><span>No memory yet — run an audit to train</span><span className="mx-1">·</span></>
+                }
                 <Cpu className="h-3 w-3" />
-                <span>DeepSeek V3 → Gemini Flash → Qwen3 → Llama 3.3 (auto-fallback)</span>
+                <span>Free models with auto-fallback</span>
               </div>
             </motion.div>
 
