@@ -402,7 +402,7 @@ async function callAI(
       messages,
       tools:       tools.length > 0 ? tools : undefined,
       tool_choice: tools.length > 0 ? "auto" : undefined,
-      max_tokens:  1500,
+      max_tokens:  3000,
       temperature: 0.3,
     }),
     signal: AbortSignal.timeout(60_000),
@@ -2208,8 +2208,8 @@ EXECUTION RULES:
 
     emit({ type: "model", model: currentModel, mode: taskMode });
 
-    // Agentic loop — max 3 iterations (token optimization)
-    for (let iter = 0; iter < 3; iter++) {
+    // Agentic loop — max 5 iterations
+    for (let iter = 0; iter < 5; iter++) {
       let response: OAIResponse | null = null;
 
       // Try fallback chain starting from current model index
