@@ -1,0 +1,438 @@
+Do NOT build anything yet. Read this entire prompt first, then implement everything in order. After each section, confirm it builds without TypeScript errors before moving to the next.
+
+===================================================================
+SECTION 1 — PROVIDER CHAIN (implement first)
+===================================================================
+
+Replace the entire getProvider() and buildFallbackChain() logic with a new multi-provider system.
+
+Create a new file: api-server/src/providers.ts
+
+```typescript
+import Anthropic from "@anthropic-ai/sdk";
+
+export type ProviderName = "claude" | "gemini" | "groq" | "mistral" | "cloudflare" | "deepseek" | "openrouter_free";
+
+export interface AIMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AIResponse {
+  content: string;
+  provider: ProviderName;
+  model: string;
+  tokens: number;
+}
+
+// Fixed provider chain — tried in order, auto-fallback on error
+const PROVIDER_CHAIN: ProviderName[] = [
+  "claude",
+  "gemini", 
+  "groq",
+  "mistral",
+  "cloudflare",
+  "deepseek",
+  "openrouter_free"
+];
+
+// Fixed models for each provider
+const PROVIDER_MODELS: Record<ProviderName, string> = {
+  claude:          "claude-sonnet-4-20250514",
+  gemini:          "gemini-2.0-flash-001",
+  groq:            "llama-3.3-70b-versatile",
+  mistral:         "mistral-small-latest",
+  cloudflare:      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  deepseek:        "deepseek/deepseek-v4-flash:free",
+  openrouter_free: "google/gemini-2.0-flash-001:free"
+};
+
+// Daily token limits per provider
+export const PROVIDER_LIMITS: Record<ProviderName, number> = {
+  claude:          1_000_000,
+  gemini:          1_500_000,
+  groq:            500_000,
+  mistral:         1_000_000,
+  cloudflare:      1_000_000,
+  deepseek:        1_000_000,
+  openrouter_free: 1_000_000
+};
+
+// Track daily usage per provider (resets at midnight)
+const dailyUsage: Record<ProviderName, { tokens: number; date: string }> = {} as any;
+
+function getTodayDate(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getUsage(provider: ProviderName): number {
+  const today = getTodayDate();
+  if (!dailyUsage[provider] || dailyUsage[provider].date !== today) {
+    dailyUsage[provider] = { tokens: 0, date: today };
+  }
+  return dailyUsage[provider].tokens;
+}
+
+function addUsage(provider: ProviderName, tokens: number): void {
+  const today = getTodayDate();
+  if (!dailyUsage[provider] || dailyUsage[provider].date !== today) {
+    dailyUsage[provider] = { tokens: 0, date: today };
+  }
+  dailyUsage[provider].tokens += tokens;
+}
+
+function isProviderAvailable(provider: ProviderName): boolean {
+  return getUsage(provider) < PROVIDER_LIMITS[provider];
+}
+
+export function getProviderStatus(): Record<ProviderName, { used: number; limit: number; available: boolean }> {
+  const status: any = {};
+  for (const provider of PROVIDER_CHAIN) {
+    status[provider] = {
+      used: getUsage(provider),
+      limit: PROVIDER_LIMITS[provider],
+      available: isProviderAvailable(provider)
+    };
+  }
+  return status;
+}
+
+// Main function — tries providers in order, auto-fallback on error
+export async function callWithFallback(
+  messages: AIMessage[],
+  tools: any[],
+  systemPrompt: string
+): Promise<AIResponse> {
+  const errors: string[] = [];
+
+  for (const provider of PROVIDER_CHAIN) {
+    if (!isProviderAvailable(provider)) {
+      errors.push(`${provider}: daily limit reached`);
+      continue;
+    }
+
+    try {
+      const result = await callProvider(provider, messages, tools, systemPrompt);
+      addUsage(provider, result.tokens);
+      return result;
+    } catch (err: any) {
+      errors.push(`${provider}: ${err.message}`);
+      console.warn(`[providers] ${provider} failed, trying next...`, err.message);
+      continue;
+    }
+  }
+
+  throw new Error(`All providers failed:\n${errors.join("\n")}`);
+}
+
+async function callProvider(
+  provider: ProviderName,
+  messages: AIMessage[],
+  tools: any[],
+  systemPrompt: string
+): Promise<AIResponse> {
+  const model = PROVIDER_MODELS[provider];
+
+  // Claude via Replit AI Integration
+  if (provider === "claude") {
+    const client = new Anthropic({
+      baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+      apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
+    });
+
+    const response = await client.messages.create({
+      model,
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: messages as any,
+      tools: tools.length > 0 ? tools : undefined,
+    });
+
+    const content = response.content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text)
+      .join("");
+
+    return {
+      content,
+      provider,
+      model,
+      tokens: response.usage.input_tokens + response.usage.output_tokens
+    };
+  }
+
+  // Gemini via Google AI Studio
+  if (provider === "gemini") {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: messages.map(m => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }]
+          })),
+          generationConfig: { maxOutputTokens: 1500 }
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error(`Gemini ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const tokens = (data.usageMetadata?.promptTokenCount ?? 0) + (data.usageMetadata?.candidatesTokenCount ?? 0);
+
+    return { content, provider, model, tokens };
+  }
+
+  // Groq
+  if (provider === "groq") {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1500,
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        tools: tools.length > 0 ? tools : undefined
+      })
+    });
+
+    if (!response.ok) throw new Error(`Groq ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content ?? "";
+    const tokens = data.usage?.total_tokens ?? 0;
+
+    return { content, provider, model, tokens };
+  }
+
+  // Mistral
+  if (provider === "mistral") {
+    const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1500,
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        tools: tools.length > 0 ? tools : undefined
+      })
+    });
+
+    if (!response.ok) throw new Error(`Mistral ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content ?? "";
+    const tokens = data.usage?.total_tokens ?? 0;
+
+    return { content, provider, model, tokens };
+  }
+
+  // Cloudflare Workers AI
+  if (provider === "cloudflare") {
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.CLOUDFLARE_API_KEY}`
+        },
+        body: JSON.stringify({
+          messages: [{ role: "system", content: systemPrompt }, ...messages],
+          max_tokens: 1500
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error(`Cloudflare ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.result?.response ?? "";
+    const tokens = data.result?.usage?.total_tokens ?? 500;
+
+    return { content, provider, model, tokens };
+  }
+
+  // DeepSeek via OpenRouter (fixed model)
+  if (provider === "deepseek") {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "https://joexads.repl.co",
+        "X-Title": "Joex Ads Dashboard"
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4-flash:free",
+        max_tokens: 1500,
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        tools: tools.length > 0 ? tools : undefined
+      })
+    });
+
+    if (!response.ok) throw new Error(`DeepSeek ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content ?? "";
+    const tokens = data.usage?.total_tokens ?? 0;
+
+    return { content, provider, model, tokens };
+  }
+
+  // OpenRouter Free — any free model (last resort)
+  if (provider === "openrouter_free") {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "https://joexads.repl.co",
+        "X-Title": "Joex Ads Dashboard"
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.0-flash-001:free",
+        max_tokens: 1500,
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        tools: tools.length > 0 ? tools : undefined
+      })
+    });
+
+    if (!response.ok) throw new Error(`OpenRouter ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content ?? "";
+    const tokens = data.usage?.total_tokens ?? 0;
+
+    return { content, provider, model, tokens };
+  }
+
+  throw new Error(`Unknown provider: ${provider}`);
+}
+```
+
+===================================================================
+SECTION 2 — WIRE providers.ts INTO ai.ts
+===================================================================
+
+In ai.ts:
+1. Remove: getProvider(), buildFallbackChain(), fetchFreeModelsFromOpenRouter(), callAI() entire function
+2. Add at top: import { callWithFallback, getProviderStatus } from "./providers";
+3. Replace every callAI() call with callWithFallback(messages, selectedTools, systemPrompt)
+4. Add a new GET route /api/provider-status that returns getProviderStatus()
+
+===================================================================
+SECTION 3 — TOOL FILTERING (wire detectTaskMode to API call)
+===================================================================
+
+In ai.ts, add this after detectTaskMode() function:
+
+```typescript
+const TOOL_GROUPS: Record<TaskMode, string[]> = {
+  analyze: [
+    "get_account_overview", "get_breakdown", "get_daily_insights",
+    "get_account_info", "get_campaigns", "get_adsets", "get_ads",
+    "get_adcreatives", "save_account_brain"
+  ],
+  execute: [
+    "create_campaign", "pause_campaign", "enable_campaign", "set_campaign_budget",
+    "duplicate_campaign", "create_adset", "pause_adset", "enable_adset",
+    "set_adset_budget", "create_ad", "pause_ad", "enable_ad",
+    "execute_campaign_template", "save_account_brain",
+    "get_campaigns", "get_adsets"
+  ],
+  plan: [
+    "get_account_overview", "get_campaigns", "get_adsets",
+    "get_daily_insights", "save_account_brain"
+  ],
+  chat: []
+};
+
+function getToolsForMode(mode: TaskMode): any[] {
+  const names = TOOL_GROUPS[mode];
+  if (names.length === 0) return [];
+  return TOOLS.filter((t: any) => names.includes(t.function?.name));
+}
+```
+
+Then in the chat route, before calling the AI:
+```typescript
+const taskMode = detectTaskMode(messages);
+const selectedTools = getToolsForMode(taskMode);
+// pass selectedTools to callWithFallback — NOT the full TOOLS array
+```
+
+===================================================================
+SECTION 4 — ARABIC KEYWORDS IN detectTaskMode()
+===================================================================
+
+Replace the analyze regex line with:
+
+```typescript
+if (/\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend|صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|وقف|اتوقف|فين|مين|امتى)\b/.test(t)) return "analyze";
+```
+
+Replace the execute regex line with:
+
+```typescript
+if (/\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy|اعمل|انشئ|شغل|وقف|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه)\b/.test(t)) return "execute";
+```
+
+Replace the plan regex line with:
+
+```typescript
+if (/\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint|خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه)\b/.test(t)) return "plan";
+```
+
+===================================================================
+SECTION 5 — FRONTEND: Provider Status Indicator
+===================================================================
+
+In the AI Assistant UI, add a small provider badge next to each response that shows which provider answered. The badge should display:
+- "Claude" in purple
+- "Gemini" in blue  
+- "Groq" in orange
+- "Mistral" in pink
+- "Cloudflare" in yellow
+- "DeepSeek" in green
+- "OpenRouter" in gray
+
+The SSE stream should include the provider name in the response metadata and the frontend should render it.
+
+Also add a /provider-status page or modal (accessible from a button in the AI assistant header) that shows:
+- Each provider name
+- Tokens used today / daily limit
+- Status: Available / Limit Reached
+
+===================================================================
+SECTION 6 — TEMPLATE BUGS (fix these exact issues)
+===================================================================
+
+BUG 1 — creative_testing template:
+Change optimization_goal from "LINK_CLICKS" to "OFFSITE_CONVERSIONS"
+
+BUG 2 — cbo_scaling template:
+In the executor, when template is cbo_scaling, set budget ONLY at campaign level.
+Do NOT set per-adset budgets. Skip budget assignment for adsets entirely.
+
+===================================================================
+IMPLEMENTATION ORDER
+===================================================================
+
+1. Create providers.ts (Section 1)
+2. Wire into ai.ts (Section 2) — build and confirm no errors
+3. Add tool filtering (Section 3) — build and confirm
+4. Add Arabic keywords (Section 4) — build and confirm
+5. Frontend provider badge (Section 5)
+6. Fix template bugs (Section 6)
+
+After ALL sections are done, restart both servers and confirm:
+- /api/provider-status returns data
+- A test message "صرفت كام انهردا" triggers analyze mode (not chat)
+- A test message "اعمل حمله" triggers execute mode
+- Provider badge shows in the UI
