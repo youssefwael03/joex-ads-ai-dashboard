@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { getTemplate, listTemplates, buildNamingConvention } from "../templates/campaigns";
 import {
   callWithFallback,
+  callProvider,
   getProviderStatus,
   type AIMessage,
   type ProviderName,
@@ -1870,9 +1871,10 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     return;
   }
 
-  const { messages, context } = req.body as {
+  const { messages, context, selectedProvider } = req.body as {
     messages: { role: "user" | "assistant"; content: string }[];
     model?: string;
+    selectedProvider?: string;
     context?: {
       accountId?: string;
       accountName?: string;
@@ -1881,6 +1883,12 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
       until?: string;
     };
   };
+
+  const VALID_PROVIDERS: ProviderName[] = ["claude", "gemini", "groq", "mistral", "cloudflare", "deepseek", "openrouter_free"];
+  const forcedProvider: ProviderName | null =
+    selectedProvider && selectedProvider !== "auto" && VALID_PROVIDERS.includes(selectedProvider as ProviderName)
+      ? (selectedProvider as ProviderName)
+      : null;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: "messages array is required" });
@@ -1960,11 +1968,13 @@ EXECUTION RULES:
     const tokensTotal = { prompt: 0, completion: 0, total: 0 };
     const startTime = Date.now();
 
-    emit({ type: "model", model: "auto", provider: "auto", mode: taskMode });
+    emit({ type: "model", model: forcedProvider ?? "auto", provider: forcedProvider ?? "auto", mode: taskMode });
 
     // Agentic loop — max 5 iterations
     for (let iter = 0; iter < 5; iter++) {
-      const aiResult = await callWithFallback(currentMessages, selectedTools, systemPrompt);
+      const aiResult = forcedProvider
+        ? await callProvider(forcedProvider, currentMessages, selectedTools, systemPrompt)
+        : await callWithFallback(currentMessages, selectedTools, systemPrompt);
 
       lastProvider = aiResult.provider;
       lastModel    = aiResult.model;

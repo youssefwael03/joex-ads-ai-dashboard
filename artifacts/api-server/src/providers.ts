@@ -38,7 +38,7 @@ const PROVIDER_CHAIN: ProviderName[] = [
 
 // Fixed models for each provider
 const PROVIDER_MODELS: Record<ProviderName, string> = {
-  claude:          "claude-sonnet-4-20250514",
+  claude:          "claude-sonnet-4-5-20251001",
   gemini:          "gemini-2.0-flash-001",
   groq:            "llama-3.3-70b-versatile",
   mistral:         "mistral-small-latest",
@@ -130,7 +130,7 @@ export async function callWithFallback(
 
 // ── Provider call implementations ─────────────────────────────────────────────
 
-async function callProvider(
+export async function callProvider(
   provider: ProviderName,
   messages: AIMessage[],
   tools: any[],
@@ -260,7 +260,7 @@ async function callProvider(
     );
 
     if (!response.ok) throw new Error(`Gemini ${response.status}: ${await response.text()}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     const content =
       data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     const tokens =
@@ -289,7 +289,7 @@ async function callProvider(
     });
 
     if (!response.ok) throw new Error(`Groq ${response.status}: ${await response.text()}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     const content    = data.choices?.[0]?.message?.content ?? "";
     const toolCalls  = data.choices?.[0]?.message?.tool_calls;
     const tokens     = data.usage?.total_tokens ?? 0;
@@ -323,7 +323,7 @@ async function callProvider(
     });
 
     if (!response.ok) throw new Error(`Mistral ${response.status}: ${await response.text()}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     const content   = data.choices?.[0]?.message?.content ?? "";
     const toolCalls = data.choices?.[0]?.message?.tool_calls;
     const tokens    = data.usage?.total_tokens ?? 0;
@@ -368,7 +368,7 @@ async function callProvider(
     );
 
     if (!response.ok) throw new Error(`Cloudflare ${response.status}: ${await response.text()}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     const content = data.result?.response ?? "";
     const tokens  = data.result?.usage?.total_tokens ?? 500;
 
@@ -396,7 +396,7 @@ async function callProvider(
     });
 
     if (!response.ok) throw new Error(`DeepSeek ${response.status}: ${await response.text()}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     const content   = data.choices?.[0]?.message?.content ?? "";
     const toolCalls = data.choices?.[0]?.message?.tool_calls;
     const tokens    = data.usage?.total_tokens ?? 0;
@@ -432,7 +432,7 @@ async function callProvider(
     });
 
     if (!response.ok) throw new Error(`OpenRouter ${response.status}: ${await response.text()}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     const content   = data.choices?.[0]?.message?.content ?? "";
     const toolCalls = data.choices?.[0]?.message?.tool_calls;
     const tokens    = data.usage?.total_tokens ?? 0;

@@ -30,13 +30,20 @@ import {
   Layers, Search, Target, MessageSquare, Activity,
 } from "lucide-react";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Provider options ──────────────────────────────────────────────────────────
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  description: string;
-}
+const PROVIDER_OPTIONS = [
+  { value: "auto",            label: "Auto",          description: "Claude → Gemini → Groq → Mistral → Cloudflare → DeepSeek → OpenRouter" },
+  { value: "claude",          label: "Claude",        description: "claude-sonnet-4-5 via Replit AI Integrations" },
+  { value: "gemini",          label: "Gemini",        description: "gemini-2.0-flash-001 via Google AI Studio" },
+  { value: "groq",            label: "Groq",          description: "llama-3.3-70b-versatile via Groq" },
+  { value: "mistral",         label: "Mistral",       description: "mistral-small-latest via Mistral AI" },
+  { value: "cloudflare",      label: "Cloudflare",    description: "llama-3.3-70b via Cloudflare Workers AI" },
+  { value: "deepseek",        label: "DeepSeek",      description: "deepseek-v4-flash:free via OpenRouter" },
+  { value: "openrouter_free", label: "OpenRouter Free", description: "gemini-2.0-flash-001:free via OpenRouter" },
+];
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ApiMessage {
   role: "user" | "assistant";
@@ -137,7 +144,7 @@ const MODE_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 function ModeBadge({ mode }: { mode?: TaskMode }) {
-  if (!mode || mode === "") return null;
+  if (!mode) return null;
   const cfg = MODE_CONFIG[mode];
   if (!cfg) return null;
   return (
@@ -493,15 +500,13 @@ export default function AIAssistant() {
   const { since, until }  = useDateStore();
   const currency          = useAccountCurrency();
 
-  const [displayItems,   setDisplayItems]   = useState<DisplayItem[]>([]);
-  const [apiMessages,    setApiMessages]    = useState<ApiMessage[]>([]);
-  const [isLoading,      setIsLoading]      = useState(false);
-  const [input,          setInput]          = useState("");
-  const [currentModel,   setCurrentModel]   = useState<string>("");
-  const [models,         setModels]         = useState<ModelInfo[]>([]);
-  const [selectedModel,  setSelectedModel]  = useState<string>("auto");
-  const [provider,       setProvider]       = useState<string>("");
-  const [brain,          setBrain]          = useState<BrainData | null>(null);
+  const [displayItems,    setDisplayItems]    = useState<DisplayItem[]>([]);
+  const [apiMessages,     setApiMessages]     = useState<ApiMessage[]>([]);
+  const [isLoading,       setIsLoading]       = useState(false);
+  const [input,           setInput]           = useState("");
+  const [currentModel,    setCurrentModel]    = useState<string>("");
+  const [selectedProvider, setSelectedProvider] = useState<string>("auto");
+  const [brain,           setBrain]           = useState<BrainData | null>(null);
   const [isClearing,     setIsClearing]     = useState(false);
   const [showProviderStatus, setShowProviderStatus] = useState(false);
   const [providerStatus,     setProviderStatus]     = useState<Record<string, { used: number; limit: number; available: boolean }> | null>(null);
@@ -535,19 +540,6 @@ export default function AIAssistant() {
     }
   }, [selectedAccountId, isClearing]);
 
-  // Fetch available models from backend
-  useEffect(() => {
-    const token = localStorage.getItem("joex_ads_token");
-    fetch("/api/ai/models", {
-      headers: token ? { "X-Meta-Token": token } : {},
-    })
-      .then((r) => r.json())
-      .then((d: { provider: string; models: ModelInfo[] }) => {
-        setModels(d.models ?? []);
-        setProvider(d.provider ?? "");
-      })
-      .catch(() => {});
-  }, []);
 
   // Load brain whenever selected account changes
   useEffect(() => {
@@ -593,7 +585,7 @@ export default function AIAssistant() {
           },
           body: JSON.stringify({
             messages: newApiMessages,
-            model: selectedModel,
+            selectedProvider,
             context: {
               accountId:   selectedAccountId ?? undefined,
               accountName: selectedAccountName ?? undefined,
@@ -794,7 +786,7 @@ export default function AIAssistant() {
         textareaRef.current?.focus();
       }
     },
-    [apiMessages, isLoading, selectedAccountId, selectedAccountName, currency, since, until, selectedModel, fetchBrain],
+    [apiMessages, isLoading, selectedAccountId, selectedAccountName, currency, since, until, selectedProvider, fetchBrain],
   );
 
   const clearChat = () => {
@@ -840,40 +832,38 @@ export default function AIAssistant() {
             </Badge>
           )}
 
-          {/* Model selector */}
-          {models.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs border-card-border bg-card/40 hover:bg-card/80 text-muted-foreground hover:text-foreground"
-                >
-                  <Cpu className="h-3 w-3 shrink-0" />
-                  <span>
-                    {currentModel
-                      ? fmtModel(currentModel)
-                      : (models.find((m) => m.id === selectedModel)?.name ?? "Auto")}
-                  </span>
-                  <ChevronDown className="h-3 w-3 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
-                  {provider === "openrouter" ? "OpenRouter Models (free)" : "OpenAI Models"}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuRadioGroup value={selectedModel} onValueChange={setSelectedModel}>
-                  {models.map((m) => (
-                    <DropdownMenuRadioItem key={m.id} value={m.id} className="flex-col items-start gap-0">
-                      <span className="font-medium text-sm">{m.name}</span>
-                      <span className="text-xs text-muted-foreground">{m.description}</span>
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          {/* Provider selector */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs border-card-border bg-card/40 hover:bg-card/80 text-muted-foreground hover:text-foreground"
+              >
+                <Cpu className="h-3 w-3 shrink-0" />
+                <span>
+                  {selectedProvider === "auto"
+                    ? (currentModel && isLoading ? fmtModel(currentModel) : "Auto")
+                    : (PROVIDER_OPTIONS.find((p) => p.value === selectedProvider)?.label ?? "Auto")}
+                </span>
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
+                AI Provider
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioGroup value={selectedProvider} onValueChange={setSelectedProvider}>
+                {PROVIDER_OPTIONS.map((p) => (
+                  <DropdownMenuRadioItem key={p.value} value={p.value} className="flex-col items-start gap-0">
+                    <span className="font-medium text-sm">{p.label}</span>
+                    <span className="text-xs text-muted-foreground">{p.description}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Active model badge (when chatting) */}
           {currentModel && isLoading && (
