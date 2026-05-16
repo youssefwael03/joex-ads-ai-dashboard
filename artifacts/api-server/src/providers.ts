@@ -2,7 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export type ProviderName =
   | "claude"
-  | "gemini"
   | "groq"
   | "mistral"
   | "cloudflare"
@@ -26,9 +25,9 @@ export interface AIResponse {
 }
 
 // Fixed provider chain — tried in order, auto-fallback on error
+// Gemini removed: free tier has limit: 0 and will never work
 const PROVIDER_CHAIN: ProviderName[] = [
   "claude",
-  "gemini",
   "groq",
   "mistral",
   "cloudflare",
@@ -38,8 +37,7 @@ const PROVIDER_CHAIN: ProviderName[] = [
 
 // Fixed models for each provider
 const PROVIDER_MODELS: Record<ProviderName, string> = {
-  claude:          "claude-sonnet-4-5-20251001",
-  gemini:          "gemini-2.0-flash-001",
+  claude:          "claude-haiku-4-5-20251001",
   groq:            "llama-3.3-70b-versatile",
   mistral:         "mistral-small-latest",
   cloudflare:      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
@@ -50,13 +48,43 @@ const PROVIDER_MODELS: Record<ProviderName, string> = {
 // Daily token limits per provider
 export const PROVIDER_LIMITS: Record<ProviderName, number> = {
   claude:          1_000_000,
-  gemini:          1_500_000,
   groq:            500_000,
   mistral:         1_000_000,
   cloudflare:      1_000_000,
   deepseek:        1_000_000,
   openrouter_free: 1_000_000,
 };
+
+// ── Claude model discovery ─────────────────────────────────────────────────────
+// Start with known-good model; try to confirm/update from the integration's /models list at startup
+
+let claudeModel = "claude-haiku-4-5-20251001";
+
+async function initClaudeModel(): Promise<void> {
+  try {
+    const baseURL = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
+    const apiKey  = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
+    if (!baseURL || !apiKey) return;
+    const res = await fetch(`${baseURL}/models`, {
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (res.ok) {
+      const data = await res.json() as any;
+      const first: string | undefined = data?.data?.[0]?.id;
+      if (first) claudeModel = first;
+    }
+  } catch {
+    // keep default
+  }
+  console.log("[claude] model:", claudeModel);
+}
+
+// ── OpenRouter startup check ───────────────────────────────────────────────────
+console.log("[openrouter] key set:", !!process.env.OPENROUTER_API_KEY);
+
+// Non-blocking model discovery
+initClaudeModel().catch(() => {});
 
 // Track daily usage per provider (resets at midnight)
 const dailyUsage: Record<ProviderName, { tokens: number; date: string }> = {} as any;
@@ -145,6 +173,9 @@ export async function callProvider(
       apiKey:  process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
     });
 
+    // Use dynamically discovered model (resolved at startup from /models endpoint)
+    const resolvedModel = claudeModel;
+
     // Convert OAI tools → Anthropic format
     const anthropicTools = tools.length > 0
       ? tools.map((t: any) => ({
@@ -187,7 +218,7 @@ export async function callProvider(
     }
 
     const response = await client.messages.create({
-      model,
+      model:      resolvedModel,
       max_tokens: 1500,
       system:     systemPrompt,
       messages:   anthropicMessages,
@@ -213,61 +244,11 @@ export async function callProvider(
     return {
       content,
       provider,
-      model,
+      model:       resolvedModel,
       tokens:      response.usage.input_tokens + response.usage.output_tokens,
       toolCalls:   toolCalls.length > 0 ? toolCalls : undefined,
       finishReason: response.stop_reason === "end_turn" ? "stop" : (response.stop_reason ?? undefined),
     };
-  }
-
-  // ── Gemini via Google AI Studio ────────────────────────────────────────────
-  if (provider === "gemini") {
-    if (!process.env.GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY not set");
-
-    // Convert messages to Gemini format (collapse tool messages into user text)
-    const geminiContents: any[] = [];
-    for (const msg of messages) {
-      if (msg.role === "tool") {
-        const last = geminiContents[geminiContents.length - 1];
-        const toolText = `Tool result: ${msg.content ?? ""}`;
-        if (last?.role === "user" && typeof last.parts?.[0]?.text === "string") {
-          last.parts[0].text += "\n" + toolText;
-        } else {
-          geminiContents.push({ role: "user", parts: [{ text: toolText }] });
-        }
-      } else if (msg.role === "assistant" && msg.tool_calls?.length) {
-        geminiContents.push({ role: "model", parts: [{ text: msg.content ?? "" }] });
-      } else if (msg.role === "user" || msg.role === "assistant") {
-        geminiContents.push({
-          role:  msg.role === "assistant" ? "model" : "user",
-          parts: [{ text: msg.content ?? "" }],
-        });
-      }
-    }
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${process.env.GOOGLE_API_KEY}`,
-      {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents:          geminiContents,
-          generationConfig:  { maxOutputTokens: 1500 },
-        }),
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
-
-    if (!response.ok) throw new Error(`Gemini ${response.status}: ${await response.text()}`);
-    const data = await response.json() as any;
-    const content =
-      data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const tokens =
-      (data.usageMetadata?.promptTokenCount ?? 0) +
-      (data.usageMetadata?.candidatesTokenCount ?? 0);
-
-    return { content, provider, model, tokens };
   }
 
   // ── Groq ───────────────────────────────────────────────────────────────────

@@ -33,9 +33,8 @@ import {
 // ── Provider options ──────────────────────────────────────────────────────────
 
 const PROVIDER_OPTIONS = [
-  { value: "auto",            label: "Auto",          description: "Claude → Gemini → Groq → Mistral → Cloudflare → DeepSeek → OpenRouter" },
-  { value: "claude",          label: "Claude",        description: "claude-sonnet-4-5 via Replit AI Integrations" },
-  { value: "gemini",          label: "Gemini",        description: "gemini-2.0-flash-001 via Google AI Studio" },
+  { value: "auto",            label: "Auto",          description: "Claude → Groq → Mistral → Cloudflare → DeepSeek → OpenRouter" },
+  { value: "claude",          label: "Claude",        description: "claude-haiku-4-5 via Replit AI Integrations" },
   { value: "groq",            label: "Groq",          description: "llama-3.3-70b-versatile via Groq" },
   { value: "mistral",         label: "Mistral",       description: "mistral-small-latest via Mistral AI" },
   { value: "cloudflare",      label: "Cloudflare",    description: "llama-3.3-70b via Cloudflare Workers AI" },

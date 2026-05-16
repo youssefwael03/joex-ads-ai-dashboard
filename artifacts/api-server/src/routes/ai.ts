@@ -1898,7 +1898,7 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     };
   };
 
-  const VALID_PROVIDERS: ProviderName[] = ["claude", "gemini", "groq", "mistral", "cloudflare", "deepseek", "openrouter_free"];
+  const VALID_PROVIDERS: ProviderName[] = ["claude", "groq", "mistral", "cloudflare", "deepseek", "openrouter_free"];
   const forcedProvider: ProviderName | null =
     selectedProvider && selectedProvider !== "auto" && VALID_PROVIDERS.includes(selectedProvider as ProviderName)
       ? (selectedProvider as ProviderName)
