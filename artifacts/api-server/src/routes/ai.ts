@@ -1052,9 +1052,23 @@ type TaskMode = "analyze" | "execute" | "plan" | "chat";
 function detectTaskMode(messages: { role: string; content: string }[]): TaskMode {
   const last = messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
   const t = last.toLowerCase();
-  if (/\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend|صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|وقف|اتوقف|فين|مين|امتى)\b/.test(t)) return "analyze";
-  if (/\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy|اعمل|انشئ|شغل|وقف|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه)\b/.test(t)) return "execute";
-  if (/\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint|خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه)\b/.test(t)) return "plan";
+
+  // Latin keywords use \b; Arabic keywords use plain alternation (Arabic chars are \W so \b never fires at Arabic boundaries)
+  if (
+    /\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend)\b/.test(t) ||
+    /(صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|وقف|اتوقف|فين|مين|امتى)/.test(t)
+  ) return "analyze";
+
+  if (
+    /\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy)\b/.test(t) ||
+    /(اعمل|انشئ|شغل|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه)/.test(t)
+  ) return "execute";
+
+  if (
+    /\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint)\b/.test(t) ||
+    /(خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه)/.test(t)
+  ) return "plan";
+
   return "chat";
 }
 
@@ -1733,8 +1747,8 @@ async function executeTool(
         }
 
         const campaignData = await metaPost(`/act_${accountId}/campaigns`, token, campaignBody);
-        if (campaignData.error) {
-          return { success: false, error: `Campaign creation failed: ${campaignData.error.message ?? JSON.stringify(campaignData.error)}` };
+        if (!campaignData || campaignData.error) {
+          return { success: false, error: `Campaign creation failed: ${campaignData?.error?.message ?? JSON.stringify(campaignData?.error ?? campaignData)}` };
         }
         const campaignId: string = campaignData.id;
 
@@ -1779,10 +1793,10 @@ async function executeTool(
           }
 
           const adsetData = await metaPost(`/act_${accountId}/adsets`, token, adsetBody);
-          if (adsetData.error) {
+          if (!adsetData || adsetData.error) {
             return {
               success: false,
-              error: `Ad set creation failed (${adsetName}): ${adsetData.error.message ?? JSON.stringify(adsetData.error)}`,
+              error: `Ad set creation failed (${adsetName}): ${adsetData?.error?.message ?? JSON.stringify(adsetData?.error ?? adsetData)}`,
               data: { campaign_id: campaignId, adsets_created: adsetIds.length },
             };
           }
@@ -1905,6 +1919,8 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
 
   // Detect task mode first (used in system prompt construction)
   const taskMode = detectTaskMode(messages);
+  console.log(`[AI] taskMode="${taskMode}" | last_user_msg="${messages.filter(m => m.role === "user").at(-1)?.content?.slice(0, 80) ?? ""}"`);
+
 
   // Load brain before building system prompt
   const brain = accountId ? await loadBrain(accountId) : null;
@@ -1942,6 +1958,8 @@ EXECUTION RULES:
   // Select relevant tool subset for detected mode
   const allOAITools = accountId ? toOAITools(TOOLS) : [];
   const selectedTools = getToolsForMode(taskMode, allOAITools);
+  console.log(`[AI] selectedTools=[${selectedTools.map((t: any) => t.function?.name).join(", ")}]`);
+
 
   // SSE setup
   res.setHeader("Content-Type", "text/event-stream");
