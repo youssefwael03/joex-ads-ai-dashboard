@@ -404,7 +404,7 @@ export async function callProvider(
         "X-Title":       "Joex Ads Dashboard",
       },
       body: JSON.stringify({
-        model:      "google/gemini-2.0-flash-001:free",
+        model:      "openrouter/free",
         max_tokens: 1500,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
