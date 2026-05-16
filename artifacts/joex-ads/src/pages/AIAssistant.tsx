@@ -7,6 +7,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
@@ -21,7 +27,7 @@ import {
   Database, CheckCircle2, XCircle, Zap, Play, Pause, DollarSign,
   TrendingUp, BarChart3, Globe, Smartphone, Calendar, Users,
   Cpu, Clock, AlertTriangle, ChevronDown, Trash2, FlaskConical,
-  Layers, Search, Target, MessageSquare,
+  Layers, Search, Target, MessageSquare, Activity,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -68,10 +74,12 @@ interface TokenUsage {
 
 type TaskMode = "analyze" | "execute" | "plan" | "chat" | "";
 
+type ProviderName = "claude" | "gemini" | "groq" | "mistral" | "cloudflare" | "deepseek" | "openrouter_free";
+
 type DisplayItem =
   | { kind: "user"; content: string }
-  | { kind: "assistant"; content: string; toolEvents: ToolEvent[]; model?: string; tokens?: TokenUsage; duration?: number; fallbacks?: string[]; mode?: TaskMode }
-  | { kind: "streaming"; content: string; toolEvents: ToolEvent[]; model?: string; fallbacks?: string[]; mode?: TaskMode };
+  | { kind: "assistant"; content: string; toolEvents: ToolEvent[]; model?: string; provider?: string; tokens?: TokenUsage; duration?: number; fallbacks?: string[]; mode?: TaskMode }
+  | { kind: "streaming"; content: string; toolEvents: ToolEvent[]; model?: string; provider?: string; fallbacks?: string[]; mode?: TaskMode };
 
 // ── Model display names ────────────────────────────────────────────────────────
 
@@ -132,6 +140,28 @@ function ModeBadge({ mode }: { mode?: TaskMode }) {
   if (!mode || mode === "") return null;
   const cfg = MODE_CONFIG[mode];
   if (!cfg) return null;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border uppercase tracking-wider ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+// ── Provider badge ─────────────────────────────────────────────────────────────
+
+const PROVIDER_CONFIG: Record<string, { label: string; color: string }> = {
+  claude:          { label: "Claude",      color: "border-purple-500/40 text-purple-400 bg-purple-500/10" },
+  gemini:          { label: "Gemini",      color: "border-blue-500/40 text-blue-400 bg-blue-500/10" },
+  groq:            { label: "Groq",        color: "border-orange-500/40 text-orange-400 bg-orange-500/10" },
+  mistral:         { label: "Mistral",     color: "border-pink-500/40 text-pink-400 bg-pink-500/10" },
+  cloudflare:      { label: "Cloudflare",  color: "border-yellow-500/40 text-yellow-400 bg-yellow-500/10" },
+  deepseek:        { label: "DeepSeek",    color: "border-green-500/40 text-green-400 bg-green-500/10" },
+  openrouter_free: { label: "OpenRouter",  color: "border-gray-500/40 text-gray-400 bg-gray-500/10" },
+};
+
+function ProviderBadge({ provider }: { provider?: string }) {
+  if (!provider || !PROVIDER_CONFIG[provider]) return null;
+  const cfg = PROVIDER_CONFIG[provider];
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border uppercase tracking-wider ${cfg.color}`}>
       {cfg.label}
@@ -339,6 +369,7 @@ function AssistantBubble({
   toolEvents,
   isStreaming,
   model,
+  provider,
   tokens,
   duration,
   fallbacks,
@@ -348,6 +379,7 @@ function AssistantBubble({
   toolEvents: ToolEvent[];
   isStreaming?: boolean;
   model?: string;
+  provider?: string;
   tokens?: TokenUsage;
   duration?: number;
   fallbacks?: string[];
@@ -377,10 +409,11 @@ function AssistantBubble({
         <BrainCircuit className="h-4 w-4 text-secondary" />
       </div>
       <div className="flex-1 min-w-0 space-y-1.5">
-        {/* Mode + fallback row */}
-        {(mode || fallbackPairs.length > 0) && (
+        {/* Mode + provider + fallback row */}
+        {(mode || provider || fallbackPairs.length > 0) && (
           <div className="flex items-center gap-2 flex-wrap">
             <ModeBadge mode={mode} />
+            <ProviderBadge provider={provider} />
             {fallbackPairs.map((pair, i) => (
               <FallbackBadge key={i} from={pair.from} to={pair.to} />
             ))}
@@ -470,6 +503,8 @@ export default function AIAssistant() {
   const [provider,       setProvider]       = useState<string>("");
   const [brain,          setBrain]          = useState<BrainData | null>(null);
   const [isClearing,     setIsClearing]     = useState(false);
+  const [showProviderStatus, setShowProviderStatus] = useState(false);
+  const [providerStatus,     setProviderStatus]     = useState<Record<string, { used: number; limit: number; available: boolean }> | null>(null);
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -573,8 +608,9 @@ export default function AIAssistant() {
 
         const reader  = res.body?.getReader();
         const decoder = new TextDecoder();
-        let accText          = "";
+        let accText            = "";
         let accModel: string | undefined;
+        let accProvider: string | undefined;
         let accMode: TaskMode = "";
         const accToolEvents: ToolEvent[] = [];
         const accFallbacks: string[]    = [];
@@ -608,14 +644,15 @@ export default function AIAssistant() {
 
               // ── Model identified ───────────────────────────────────────────
               if (parsed.type === "model") {
-                accModel = parsed.model;
-                accMode  = parsed.mode ?? "";
+                accModel    = parsed.model;
+                accProvider = parsed.provider;
+                accMode     = parsed.mode ?? "";
                 setCurrentModel(parsed.model ?? "");
                 setDisplayItems((prev) => {
                   const next = [...prev];
                   const last = next[next.length - 1];
                   if (last?.kind === "streaming") {
-                    next[next.length - 1] = { ...last, model: parsed.model, mode: parsed.mode ?? "" };
+                    next[next.length - 1] = { ...last, model: parsed.model, provider: parsed.provider, mode: parsed.mode ?? "" };
                   }
                   return next;
                 });
@@ -694,6 +731,7 @@ export default function AIAssistant() {
               if (parsed.done) {
                 const finalText       = accText;
                 const finalModel      = parsed.model ?? accModel;
+                const finalProvider   = parsed.provider ?? accProvider;
                 const finalTokens     = parsed.tokens as TokenUsage | undefined;
                 const finalDuration   = parsed.duration as number | undefined;
                 const finalToolEvents = [...accToolEvents];
@@ -713,6 +751,7 @@ export default function AIAssistant() {
                       content:    finalText,
                       toolEvents: finalToolEvents,
                       model:      finalModel,
+                      provider:   finalProvider,
                       tokens:     finalTokens,
                       duration:   finalDuration,
                       fallbacks:  finalFallbacks,
@@ -844,6 +883,23 @@ export default function AIAssistant() {
             </Badge>
           )}
 
+          {/* Provider status button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 text-xs border-card-border bg-card/40 hover:bg-card/80 text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setShowProviderStatus(true);
+              fetch("/api/provider-status")
+                .then((r) => r.json())
+                .then((d) => setProviderStatus(d))
+                .catch(() => {});
+            }}
+          >
+            <Activity className="h-3 w-3 shrink-0" />
+            <span className="hidden sm:inline">Providers</span>
+          </Button>
+
           {/* Tool count */}
           {toolCount > 0 && (
             <Badge variant="outline" className="text-xs border-primary/30 text-primary gap-1">
@@ -953,6 +1009,7 @@ export default function AIAssistant() {
                       content={item.content}
                       toolEvents={item.toolEvents}
                       model={item.model}
+                      provider={item.provider}
                       tokens={item.tokens}
                       duration={item.duration}
                       fallbacks={item.fallbacks}
@@ -967,6 +1024,7 @@ export default function AIAssistant() {
                       content={item.content}
                       toolEvents={item.toolEvents}
                       model={item.model}
+                      provider={item.provider}
                       fallbacks={item.fallbacks}
                       mode={item.mode}
                       isStreaming
@@ -1019,11 +1077,61 @@ export default function AIAssistant() {
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground/50 mt-2">
-              Enter to send · Shift+Enter for new line · Powered by OpenRouter free models with auto-fallback
+              Enter to send · Shift+Enter for new line · Multi-provider chain: Claude → Gemini → Groq → Mistral → Cloudflare → DeepSeek → OpenRouter
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Provider Status Modal ─────────────────────────────────────────── */}
+      <Dialog open={showProviderStatus} onOpenChange={setShowProviderStatus}>
+        <DialogContent className="sm:max-w-md bg-card border-card-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Activity className="h-4 w-4 text-secondary" />
+              Provider Status
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            {!providerStatus ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              Object.entries(providerStatus).map(([name, info]) => {
+                const cfg = PROVIDER_CONFIG[name];
+                const pct = Math.min(100, Math.round((info.used / info.limit) * 100));
+                return (
+                  <div key={name} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-muted/20 border border-card-border">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border uppercase tracking-wider shrink-0 ${cfg?.color ?? "border-gray-500/40 text-gray-400 bg-gray-500/10"}`}>
+                        {cfg?.label ?? name}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground truncate">
+                        {info.used.toLocaleString()} / {(info.limit / 1_000_000).toFixed(1)}M tokens
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 60 ? "bg-yellow-500" : "bg-green-500"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-medium ${info.available ? "text-green-400" : "text-red-400"}`}>
+                        {info.available ? "Available" : "Limit reached"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <p className="text-[10px] text-muted-foreground/50 px-1 pt-1">
+              Usage resets daily at midnight. Providers are tried in order until one succeeds.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

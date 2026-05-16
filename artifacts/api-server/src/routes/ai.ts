@@ -2,6 +2,12 @@ import { Router, type IRouter } from "express";
 import { db, accountBrains } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getTemplate, listTemplates, buildNamingConvention } from "../templates/campaigns";
+import {
+  callWithFallback,
+  getProviderStatus,
+  type AIMessage,
+  type ProviderName,
+} from "../providers";
 
 const router: IRouter = Router();
 
@@ -157,270 +163,10 @@ function formatBrainContext(brain: BrainRow): string {
   return lines.join('\n');
 }
 
-// ── Provider detection ────────────────────────────────────────────────────────
-// Priority: OPENROUTER_API_KEY → OpenRouter (free models)
-//           OPENAI_API_KEY     → OpenAI directly (api.openai.com)
+// ── Provider chain ────────────────────────────────────────────────────────────
+// Multi-provider fallback: claude → gemini → groq → mistral → cloudflare → deepseek → openrouter_free
+// See providers.ts for full implementation.
 
-type Provider = "openrouter" | "openai";
-
-function getProvider(): Provider {
-  // Explicit OpenRouter key → OpenRouter
-  if (process.env.OPENROUTER_API_KEY) return "openrouter";
-  const oaiKey = process.env.OPENAI_API_KEY ?? "";
-  if (!oaiKey) throw new Error("No AI API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY.");
-  // OpenRouter keys start with "sk-or-" — detect even if stored in OPENAI_API_KEY
-  if (oaiKey.startsWith("sk-or-")) return "openrouter";
-  return "openai";
-}
-
-function getApiKey(): string {
-  const key = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("No AI API key configured.");
-  return key;
-}
-
-// ── Model catalogues ─────────────────────────────────────────────────────────
-
-interface ModelInfo { id: string; name: string; description: string }
-
-// Static fallback list — used when OpenRouter API is unreachable.
-// Curated: all support tool-calling, verified working. Sorted by quality/size.
-const OPENROUTER_MODELS_STATIC: ModelInfo[] = [
-  { id: "auto",                                         name: "Auto",                      description: "Tries all free models in order, skips unavailable ones" },
-  { id: "openrouter/free",                              name: "Free Router",               description: "OpenRouter picks the best available free model automatically" },
-  { id: "deepseek/deepseek-v4-flash:free",              name: "DeepSeek V4 Flash",         description: "Latest DeepSeek — fast & powerful (free, 1M ctx)" },
-  { id: "arcee-ai/trinity-large-thinking:free",         name: "Trinity Large Thinking",    description: "Deep reasoning & thinking model (free, 262K ctx)" },
-  { id: "nvidia/nemotron-3-super-120b-a12b:free",       name: "NVIDIA Nemotron 3 Super",   description: "NVIDIA 120B MoE — strong reasoning (free, 262K ctx)" },
-  { id: "google/gemma-4-31b-it:free",                   name: "Google Gemma 4 31B",        description: "Google's latest Gemma — balanced quality (free, 262K ctx)" },
-  { id: "openai/gpt-oss-120b:free",                     name: "OpenAI OSS 120B",           description: "OpenAI open-source 120B model (free, 131K ctx)" },
-  { id: "openai/gpt-oss-20b:free",                      name: "OpenAI OSS 20B",            description: "OpenAI open-source 20B — fast (free, 131K ctx)" },
-  { id: "minimax/minimax-m2.5:free",                    name: "MiniMax M2.5",              description: "MiniMax M2.5 — strong multilingual model (free, 196K ctx)" },
-  { id: "meta-llama/llama-3.3-70b-instruct:free",       name: "Llama 3.3 70B",             description: "Meta Llama 3.3 70B — reliable workhorse (free, 65K ctx)" },
-  { id: "nvidia/nemotron-3-nano-30b-a3b:free",          name: "NVIDIA Nemotron Nano 30B",  description: "NVIDIA 30B MoE — lightweight & fast (free, 256K ctx)" },
-  { id: "inclusionai/ring-2.6-1t:free",                 name: "Ring 2.6 1T",               description: "inclusionAI 1 trillion param model (free, 262K ctx)" },
-];
-
-const OPENAI_MODELS: ModelInfo[] = [
-  { id: "auto",          name: "Auto",          description: "Best available with automatic fallback" },
-  { id: "gpt-4o-mini",   name: "GPT-4o mini",   description: "Fast & affordable" },
-  { id: "gpt-4o",        name: "GPT-4o",        description: "Powerful & accurate" },
-  { id: "gpt-4.1-mini",  name: "GPT-4.1 mini",  description: "Latest efficient model" },
-  { id: "gpt-4.1",       name: "GPT-4.1",       description: "Latest powerful model" },
-];
-
-// ── Dynamic free-model fetcher (OpenRouter) ───────────────────────────────────
-// Fetches all free tool-supporting models live from OpenRouter and caches for 5 min.
-
-interface CachedModels { models: ModelInfo[]; fetchedAt: number }
-let _openrouterCache: CachedModels | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000;
-
-// Models to skip — known broken or low-quality
-const SKIP_IDS = new Set([
-  "qwen/qwen3-next-80b-a3b-instruct:free",
-  "qwen/qwen3-coder:free",
-  "openrouter/owl-alpha",
-]);
-
-// Nice display names for known model IDs
-const MODEL_NAMES: Record<string, string> = {
-  "openrouter/free":                              "Free Router",
-  "deepseek/deepseek-v4-flash:free":              "DeepSeek V4 Flash",
-  "arcee-ai/trinity-large-thinking:free":         "Trinity Large Thinking",
-  "nvidia/nemotron-3-super-120b-a12b:free":       "NVIDIA Nemotron 3 Super",
-  "google/gemma-4-31b-it:free":                   "Google Gemma 4 31B",
-  "google/gemma-4-26b-a4b-it:free":               "Google Gemma 4 26B",
-  "openai/gpt-oss-120b:free":                     "OpenAI OSS 120B",
-  "openai/gpt-oss-20b:free":                      "OpenAI OSS 20B",
-  "minimax/minimax-m2.5:free":                    "MiniMax M2.5",
-  "meta-llama/llama-3.3-70b-instruct:free":       "Llama 3.3 70B",
-  "meta-llama/llama-3.2-3b-instruct:free":        "Llama 3.2 3B",
-  "nvidia/nemotron-3-nano-30b-a3b:free":          "NVIDIA Nemotron Nano 30B",
-  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": "NVIDIA Nemotron Nano Omni",
-  "nvidia/nemotron-nano-12b-v2-vl:free":          "NVIDIA Nemotron Nano 12B",
-  "nvidia/nemotron-nano-9b-v2:free":              "NVIDIA Nemotron Nano 9B",
-  "inclusionai/ring-2.6-1t:free":                 "Ring 2.6 1T",
-  "nousresearch/hermes-3-llama-3.1-405b:free":    "Hermes 3 405B",
-  "z-ai/glm-4.5-air:free":                        "GLM 4.5 Air",
-  "poolside/laguna-m.1:free":                     "Poolside Laguna M.1",
-  "poolside/laguna-xs.2:free":                    "Poolside Laguna XS.2",
-  "baidu/cobuddy:free":                           "CoBuddy",
-  "liquid/lfm-2.5-1.2b-thinking:free":            "LFM 2.5 Thinking",
-};
-
-async function fetchFreeModelsFromOpenRouter(): Promise<ModelInfo[]> {
-  const now = Date.now();
-  if (_openrouterCache && now - _openrouterCache.fetchedAt < CACHE_TTL_MS) {
-    return _openrouterCache.models;
-  }
-
-  try {
-    const resp = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { "Accept": "application/json" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!resp.ok) throw new Error(`OpenRouter models API: ${resp.status}`);
-
-    const json = await resp.json() as { data: Array<{
-      id: string; name: string; context_length?: number;
-      pricing?: { prompt: string; completion: string };
-      supported_parameters?: string[];
-    }> };
-
-    // Filter: free + supports tools + not in skip list
-    const free = json.data.filter((m) =>
-      m.pricing?.prompt === "0" &&
-      m.pricing?.completion === "0" &&
-      m.supported_parameters?.includes("tools") &&
-      !SKIP_IDS.has(m.id)
-    );
-
-    // Sort by context length descending (bigger = more capable)
-    free.sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0));
-
-    const rawModels: ModelInfo[] = [
-      { id: "auto",            name: "Auto",        description: "Tries all free models in order, skips unavailable ones" },
-      { id: "openrouter/free", name: "Free Router", description: "OpenRouter picks the best available free model automatically" },
-      ...free.map((m) => ({
-        id:          m.id,
-        name:        MODEL_NAMES[m.id] ?? m.name.replace(/^[^:]+:\s*/, "").replace(/\s*\(free\)$/i, "").trim(),
-        description: `Free · ${((m.context_length ?? 0) / 1000).toFixed(0)}K ctx`,
-      })),
-    ];
-    // Deduplicate by id (openrouter/free may appear in both static and dynamic lists)
-    const seen = new Set<string>();
-    const models = rawModels.filter((m) => !seen.has(m.id) && seen.add(m.id));
-
-    _openrouterCache = { models, fetchedAt: now };
-    return models;
-  } catch {
-    // Return cached value (even stale) or static fallback
-    return _openrouterCache?.models ?? OPENROUTER_MODELS_STATIC;
-  }
-}
-
-async function getModels(): Promise<ModelInfo[]> {
-  try {
-    return getProvider() === "openrouter"
-      ? await fetchFreeModelsFromOpenRouter()
-      : OPENAI_MODELS;
-  } catch {
-    return OPENAI_MODELS;
-  }
-}
-
-// ── Fallback chain ─────────────────────────────────────────────────────────────
-
-// Returns the chain of model IDs to try in order.
-// "auto" → full chain. Specific model → that model first, then remaining chain as emergency fallback.
-async function buildFallbackChain(requestedModel: string): Promise<string[]> {
-  try {
-    if (getProvider() === "openrouter") {
-      const models = await fetchFreeModelsFromOpenRouter();
-      // Exclude "auto" and "openrouter/free" from the raw fallback chain
-      const all = models.filter((m) => m.id !== "auto" && m.id !== "openrouter/free").map((m) => m.id);
-      if (requestedModel === "auto") return all;
-      if (requestedModel === "openrouter/free") return ["openrouter/free", ...all];
-      return [requestedModel, ...all.filter((id) => id !== requestedModel)];
-    } else {
-      const all = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"];
-      if (requestedModel === "auto") return all;
-      return [requestedModel, ...all.filter((id) => id !== requestedModel)];
-    }
-  } catch {
-    return ["gpt-4o-mini"];
-  }
-}
-
-// Decides whether an error from a model call is retryable (skip to next model).
-function isRetryableError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message.toLowerCase() : "";
-  // Always retry on capacity/availability errors
-  if (msg.includes("no endpoints found")) return true;
-  if (msg.includes("rate limit")) return true;
-  if (msg.includes("overloaded")) return true;
-  if (msg.includes("provider returned error")) return true;
-  if (msg.includes("503") || msg.includes("502") || msg.includes("529")) return true;
-  if (msg.includes("context length") || msg.includes("too many tokens")) return false; // not retryable
-  // Default: retry on any HTTP error from free models
-  return true;
-}
-
-// ── Shared types ──────────────────────────────────────────────────────────────
-
-interface OAIToolCall {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
-}
-
-interface OAIMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
-  tool_calls?: OAIToolCall[];
-  tool_call_id?: string;
-}
-
-interface OAIResponse {
-  choices: {
-    message: { role: string; content: string | null; tool_calls?: OAIToolCall[] };
-    finish_reason: string;
-  }[];
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-  error?: { message?: string; code?: string };
-}
-
-// ── Unified AI call ───────────────────────────────────────────────────────────
-
-async function callAI(
-  messages: OAIMessage[],
-  tools: object[],
-  model: string,
-): Promise<OAIResponse> {
-  const provider = getProvider();
-  const apiKey   = getApiKey();
-
-  const headers: Record<string, string> = {
-    "Content-Type":  "application/json",
-    "Authorization": `Bearer ${apiKey}`,
-  };
-
-  let url: string;
-  if (provider === "openrouter") {
-    url = "https://openrouter.ai/api/v1/chat/completions";
-    headers["HTTP-Referer"] = "https://joexads.repl.co";
-    headers["X-Title"]      = "Joex Ads Dashboard";
-  } else {
-    url = "https://api.openai.com/v1/chat/completions";
-  }
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model,
-      messages,
-      tools:       tools.length > 0 ? tools : undefined,
-      tool_choice: tools.length > 0 ? "auto" : undefined,
-      max_tokens:  3000,
-      temperature: 0.3,
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-
-  if (!res.ok) {
-    let errMsg = `HTTP ${res.status}`;
-    try {
-      const errBody = (await res.json()) as any;
-      errMsg = errBody?.error?.message || errBody?.error?.code || errMsg;
-    } catch {}
-    throw new Error(errMsg);
-  }
-
-  const data = (await res.json()) as OAIResponse;
-  if (data.error) throw new Error(data.error.message || data.error.code || "API error");
-  return data;
-}
 
 const META_BASE = "https://graph.facebook.com/v22.0";
 
@@ -1305,33 +1051,36 @@ type TaskMode = "analyze" | "execute" | "plan" | "chat";
 function detectTaskMode(messages: { role: string; content: string }[]): TaskMode {
   const last = messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
   const t = last.toLowerCase();
-  if (/\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy)\b/.test(t)) return "execute";
-  if (/\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend)\b/.test(t)) return "analyze";
-  if (/\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint)\b/.test(t)) return "plan";
+  if (/\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend|صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|وقف|اتوقف|فين|مين|امتى)\b/.test(t)) return "analyze";
+  if (/\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy|اعمل|انشئ|شغل|وقف|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه)\b/.test(t)) return "execute";
+  if (/\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint|خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه)\b/.test(t)) return "plan";
   return "chat";
 }
 
-function getToolsForMode(mode: TaskMode, allTools: object[], hasBrain: boolean): object[] {
-  switch (mode) {
-    case "chat":
-      // Brain context is sufficient — no tools needed
-      return [];
-    case "analyze":
-      return allTools.filter((t: any) =>
-        READ_TOOL_NAMES.has(t.function.name) || t.function.name === "save_account_brain"
-      );
-    case "plan":
-      return allTools.filter((t: any) =>
-        ["get_account_overview", "get_campaigns", "get_adsets", "get_breakdown", "save_account_brain"].includes(t.function.name)
-      );
-    case "execute":
-      return allTools.filter((t: any) =>
-        ACTION_TOOLS.has(t.function.name) ||
-        ["get_campaigns", "get_adsets", "get_customaudiences", "get_adimages", "get_advideos"].includes(t.function.name)
-      );
-    default:
-      return allTools;
-  }
+const TOOL_GROUPS: Record<TaskMode, string[]> = {
+  analyze: [
+    "get_account_overview", "get_breakdown", "get_daily_insights",
+    "get_account_info", "get_campaigns", "get_adsets", "get_ads",
+    "get_adcreatives", "save_account_brain",
+  ],
+  execute: [
+    "create_campaign", "pause_campaign", "enable_campaign", "set_campaign_budget",
+    "duplicate_campaign", "create_adset", "pause_adset", "enable_adset",
+    "set_adset_budget", "create_ad", "pause_ad", "enable_ad",
+    "execute_campaign_template", "save_account_brain",
+    "get_campaigns", "get_adsets",
+  ],
+  plan: [
+    "get_account_overview", "get_campaigns", "get_adsets",
+    "get_daily_insights", "save_account_brain",
+  ],
+  chat: [],
+};
+
+function getToolsForMode(mode: TaskMode, allOAITools: any[]): any[] {
+  const names = TOOL_GROUPS[mode];
+  if (names.length === 0) return [];
+  return allOAITools.filter((t: any) => names.includes(t.function?.name));
 }
 
 // ── Tool call labels ──────────────────────────────────────────────────────────
@@ -2091,14 +1840,23 @@ router.delete("/ai/brain/:accountId", async (req, res): Promise<void> => {
 
 // ── Models endpoint ───────────────────────────────────────────────────────────
 
-router.get("/ai/models", async (_req, res): Promise<void> => {
-  try {
-    const provider = getProvider();
-    const models = await getModels();
-    res.json({ provider, models });
-  } catch (err: unknown) {
-    res.status(500).json({ error: err instanceof Error ? err.message : "No API key configured" });
-  }
+router.get("/ai/models", (_req, res): void => {
+  res.json({
+    provider: "multi",
+    models: [
+      {
+        id:          "auto",
+        name:        "Auto (Multi-Provider)",
+        description: "Claude → Gemini → Groq → Mistral → Cloudflare → DeepSeek → OpenRouter",
+      },
+    ],
+  });
+});
+
+// ── Provider status endpoint ──────────────────────────────────────────────────
+
+router.get("/provider-status", (_req, res): void => {
+  res.json(getProviderStatus());
 });
 
 // ── Main route ─────────────────────────────────────────────────────────────────
@@ -2112,7 +1870,7 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     return;
   }
 
-  const { messages, context, model: requestedModel = "auto" } = req.body as {
+  const { messages, context } = req.body as {
     messages: { role: "user" | "assistant"; content: string }[];
     model?: string;
     context?: {
@@ -2175,7 +1933,7 @@ EXECUTION RULES:
 
   // Select relevant tool subset for detected mode
   const allOAITools = accountId ? toOAITools(TOOLS) : [];
-  const oaiTools = getToolsForMode(taskMode, allOAITools, !!brain);
+  const selectedTools = getToolsForMode(taskMode, allOAITools);
 
   // SSE setup
   res.setHeader("Content-Type", "text/event-stream");
@@ -2192,106 +1950,62 @@ EXECUTION RULES:
   };
 
   try {
-    let currentMessages: OAIMessage[] = [
-      { role: "system", content: systemPrompt },
-      ...messages.map((m: { role: string; content: string }) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-    ];
+    const currentMessages: AIMessage[] = messages.map((m: { role: string; content: string }) => ({
+      role:    m.role as "user" | "assistant",
+      content: m.content,
+    }));
 
-    const fallbackChain = await buildFallbackChain(requestedModel);
-    let currentModel: string = fallbackChain[0];
-    let modelIndex = 0;
+    let lastProvider: ProviderName = "openrouter_free";
+    let lastModel = "auto";
     const tokensTotal = { prompt: 0, completion: 0, total: 0 };
     const startTime = Date.now();
 
-    emit({ type: "model", model: currentModel, mode: taskMode });
+    emit({ type: "model", model: "auto", provider: "auto", mode: taskMode });
 
     // Agentic loop — max 5 iterations
     for (let iter = 0; iter < 5; iter++) {
-      let response: OAIResponse | null = null;
+      const aiResult = await callWithFallback(currentMessages, selectedTools, systemPrompt);
 
-      // Try fallback chain starting from current model index
-      let lastErr: unknown;
-      for (let mi = modelIndex; mi < fallbackChain.length; mi++) {
-        try {
-          response = await callAI(currentMessages, oaiTools, fallbackChain[mi]);
-          if (mi !== modelIndex) {
-            const prevModel = currentModel;
-            currentModel = fallbackChain[mi];
-            modelIndex = mi;
-            emit({ type: "fallback", from: prevModel, to: currentModel, model: currentModel });
-          }
-          break;
-        } catch (err) {
-          lastErr = err;
-          const retryable = isRetryableError(err);
-          const isLast = mi === fallbackChain.length - 1;
-          if (!retryable || isLast) {
-            // Emit which model failed so frontend can show it
-            emit({ type: "model_error", model: fallbackChain[mi], error: err instanceof Error ? err.message : String(err) });
-            if (isLast) break;
-            // Non-retryable but not last: still throw
-            throw err;
-          }
-          // Retryable: emit notification and move to next model silently
-          if (!isLast) {
-            emit({ type: "model_error", model: fallbackChain[mi], error: err instanceof Error ? err.message : String(err) });
-          }
-        }
-      }
+      lastProvider = aiResult.provider;
+      lastModel    = aiResult.model;
+      tokensTotal.total += aiResult.tokens;
 
-      if (!response) {
-        const errMsg = lastErr instanceof Error ? lastErr.message : "All models unavailable";
-        throw new Error(`All models failed. Last error: ${errMsg}`);
-      }
-
-      if (response.usage) {
-        tokensTotal.prompt     += response.usage.prompt_tokens;
-        tokensTotal.completion += response.usage.completion_tokens;
-        tokensTotal.total      += response.usage.total_tokens;
-      }
-
-      const choice  = response.choices[0];
-      const message = choice.message;
-      const finish  = choice.finish_reason;
+      emit({ type: "model", model: aiResult.model, provider: aiResult.provider, mode: taskMode });
 
       // Stream text content in small chunks
-      if (message.content) {
+      if (aiResult.content) {
         const chunkSize = 4;
-        for (let i = 0; i < message.content.length; i += chunkSize) {
-          emit({ content: message.content.slice(i, i + chunkSize) });
+        for (let i = 0; i < aiResult.content.length; i += chunkSize) {
+          emit({ content: aiResult.content.slice(i, i + chunkSize) });
         }
       }
 
-      if (!message.tool_calls?.length || finish === "stop") {
+      // No tool calls or explicit stop → done
+      if (!aiResult.toolCalls?.length || aiResult.finishReason === "stop") {
         break;
       }
 
       // Add assistant turn with tool_calls to history
       currentMessages.push({
-        role: "assistant",
-        content: message.content ?? null,
-        tool_calls: message.tool_calls,
+        role:       "assistant",
+        content:    aiResult.content || null,
+        tool_calls: aiResult.toolCalls,
       });
 
       // Execute each tool call sequentially
-      for (const toolCall of message.tool_calls) {
+      for (const toolCall of aiResult.toolCalls) {
         const toolName = toolCall.function.name;
         let toolInput: Record<string, any> = {};
         try { toolInput = JSON.parse(toolCall.function.arguments || "{}"); } catch {}
 
         const isAction = ACTION_TOOLS.has(toolName);
-
         emit({ type: "tool_call", tool: toolName, label: toolCallLabel(toolName, toolInput), isAction, input: toolInput });
 
         const result = await executeTool(toolName, toolInput, token, accountId, since, until);
-
         emit({ type: "tool_done", tool: toolName, label: toolDoneLabel(toolName, toolInput, result), isAction, success: result.success, error: result.error, input: toolInput });
 
         currentMessages.push({
-          role: "tool",
+          role:         "tool",
           tool_call_id: toolCall.id,
           content: result.success
             ? JSON.stringify(trimData(result.data))
@@ -2301,7 +2015,7 @@ EXECUTION RULES:
     }
 
     const duration = Date.now() - startTime;
-    emit({ done: true, model: currentModel, tokens: tokensTotal, duration });
+    emit({ done: true, model: lastModel, provider: lastProvider, tokens: tokensTotal, duration });
     res.end();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "AI error";

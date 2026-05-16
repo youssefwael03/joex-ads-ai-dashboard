@@ -190,7 +190,7 @@ export const CAMPAIGN_TEMPLATES: Record<string, CampaignTemplate> = {
     name: "Creative Testing",
     description: "DCO/split test framework for rapid creative iteration. Tests hooks, formats, and angles systematically.",
     objective: "OUTCOME_SALES",
-    optimization_goal: "LINK_CLICKS",
+    optimization_goal: "OFFSITE_CONVERSIONS",
     billing_event: "IMPRESSIONS",
     bid_strategy: "LOWEST_COST_WITHOUT_CAP",
     placement_type: "automatic",
