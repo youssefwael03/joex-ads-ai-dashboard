@@ -42,7 +42,7 @@ const PROVIDER_MODELS: Record<ProviderName, string> = {
   mistral:         "mistral-small-latest",
   cloudflare:      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
   deepseek:        "deepseek/deepseek-v4-flash:free",
-  openrouter_free: "google/gemini-2.0-flash-001:free",
+  openrouter_free: "openrouter/free",
 };
 
 // Daily token limits per provider
