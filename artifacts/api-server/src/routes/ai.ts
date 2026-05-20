@@ -929,12 +929,12 @@ const TOOLS: ToolDef[] = [
         },
         kpi_snapshot: {
           type: "object",
-          description: "Key metrics object: { spend, roas, ctr, cpm, cpc, impressions, purchases, leads, reach }",
+          description: "Key metrics object: { spend, roas, ctr, cpm, cpc, purchases, reach, frequency, active_campaigns, paused_campaigns, total_campaigns, top_campaign_name, top_campaign_daily_budget, top_campaign_roas, date_range }",
         },
         winning_campaigns: {
           type: "array",
           items: { type: "object" },
-          description: "Top performing campaigns: [{ id, name, roas, spend, objective, status }]",
+          description: "Top performing campaigns: [{ id, name, status, daily_budget, lifetime_budget, roas, spend, purchases, ctr, cpm }] — ALWAYS include daily_budget and lifetime_budget from campaign data",
         },
         losing_campaigns: {
           type: "array",
@@ -1053,20 +1053,28 @@ function detectTaskMode(messages: { role: string; content: string }[]): TaskMode
   const last = messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
   const t = last.toLowerCase();
 
-  // Latin keywords use \b; Arabic keywords use plain alternation (Arabic chars are \W so \b never fires at Arabic boundaries)
+  // Brain update — always execute mode (check first so it wins over analyze)
   if (
-    /\b(audit|analyze|analyse|check|review|report|show me|tell me|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|which campaign|roas|ctr|cpm|spend)\b/.test(t) ||
-    /(صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|وقف|اتوقف|فين|مين|امتى)/.test(t)
-  ) return "analyze";
-
-  if (
-    /\b(create|build|launch|make|set up|setup|new campaign|execute|duplicate|scale up|pause all|enable all|deploy)\b/.test(t) ||
-    /(اعمل|انشئ|شغل|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه)/.test(t)
+    /(حدث عقلك|حدث العقل|احفظ|حفظ البيانات)/.test(t) ||
+    /\b(save brain|update brain)\b/.test(t)
   ) return "execute";
 
+  // Execute — Arabic (no \b) + English (\b only for Latin words)
   if (
-    /\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint)\b/.test(t) ||
-    /(خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه)/.test(t)
+    /\b(create|build|launch|make|set up|setup|execute|new campaign|duplicate|scale up|pause all|enable all|deploy)\b/.test(t) ||
+    /(نفذ|اعمل|انشئ|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه|وقف الحمله|وقف الحملة|شغل الحمله|شغل الحملة|ارفع الميزانيه|خفض الميزانيه|حملة كاتلوج|حمله كاتلوج|حملة جديده|حمله جديده)/.test(t)
+  ) return "execute";
+
+  // Analyze — Arabic (no \b) + English (\b only)
+  if (
+    /\b(audit|analyze|analyse|check|review|report|show|tell|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|roas|ctr|cpm|spend|budget|daily|which campaign)\b/.test(t) ||
+    /(صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|وقف|اتوقف|فين|مين|امتى|الميزانيه|الميزانية|البادجت|يومي|شغل)/.test(t)
+  ) return "analyze";
+
+  // Plan
+  if (
+    /\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|blueprint|buyer persona|segments)\b/.test(t) ||
+    /(خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه|باير بيرسونا|سيجمنتات)/.test(t)
   ) return "plan";
 
   return "chat";
@@ -1932,7 +1940,15 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     : "";
 
   const modeInstruction = taskMode === "execute"
-    ? "MODE: EXECUTE — Use execute_campaign_template for new campaigns. For edits, fetch the campaign/adset ID first, then act. Respond with what was done, not what will be done."
+    ? `MODE: EXECUTE — CRITICAL RULES:
+- NEVER write JSON in your response text
+- NEVER simulate or describe tool calls
+- ALWAYS call the actual tool directly
+- If user says نفذ after a plan: call execute_campaign_template immediately
+- If campaign creation fails: report the EXACT error from Meta API
+- Never say تم بنجاح unless you received a real campaign_id from Meta API
+- A real success always includes a numeric campaign_id like 12345678901234
+- Use execute_campaign_template for new campaigns. For edits, fetch the campaign/adset ID first, then act.`
     : taskMode === "analyze"
     ? "MODE: ANALYZE — Fetch data, identify patterns, save to brain. Be specific with numbers. No generic advice."
     : taskMode === "plan"
@@ -1953,7 +1969,14 @@ EXECUTION RULES:
 - DELETE/PAUSE actions: state exactly what you changed and why.
 - Budget changes: state old value → new value.
 - Never say "Let me fetch", "Let me think", "Now I will". Just execute and report results.
-- Token budget: be concise. Lead with the answer, support with evidence.`;
+- Token budget: be concise. Lead with the answer, support with evidence.
+
+BRAIN UPDATE RULE: When user says حدث عقلك or any brain update request:
+1. First call get_account_overview to get fresh KPIs
+2. Then call get_campaigns to get campaign list with daily_budget and lifetime_budget
+3. Then IMMEDIATELY call save_account_brain with the real data (include daily_budget/lifetime_budget in winning_campaigns)
+4. Never write JSON in text — always use the actual tool call
+5. Confirm with exact numbers that were saved`;
 
   // Select relevant tool subset for detected mode
   const allOAITools = accountId ? toOAITools(TOOLS) : [];

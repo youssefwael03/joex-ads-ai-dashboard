@@ -1,0 +1,256 @@
+Do NOT build anything yet. Read everything first, then implement in order. Build and confirm no TypeScript errors after each section.
+
+===================================================================
+SECTION 1 — FIX TASK DETECTION (Root cause of all AI problems)
+===================================================================
+
+The core problem: messages like "حدث عقلك", "نفذ", "اعمل حملة كاتلوج" 
+are being classified as "chat" mode instead of "execute".
+And messages like "الميزانية اليومية كام" are classified as "chat" instead of "analyze".
+
+In detectTaskMode(), replace the entire function with this:
+
+```typescript
+function detectTaskMode(messages: { role: string; content: string }[]): TaskMode {
+  const last = messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
+  const t = last.toLowerCase();
+
+  // Execute — Arabic + English
+  if (/\b(create|build|launch|make|set up|setup|execute|duplicate|scale up|pause all|enable all|deploy|نفذ|اعمل|انشئ|شغل|فعل|ابدا|ابدأ|عدل|غير|زود|قلل|نسخ|اعمله|اطلقه|وقف الحمله|وقف الحملة|شغل الحمله|شغل الحملة|ارفع الميزانيه|خفض الميزانيه|حملة كاتلوج|حمله كاتلوج|حملة جديده|حمله جديده)\b/.test(t)) return "execute";
+
+  // Brain update — always execute mode
+  if (/\b(حدث عقلك|حدث العقل|احفظ|save brain|update brain|حفظ البيانات)\b/.test(t)) return "execute";
+
+  // Analyze — Arabic + English  
+  if (/\b(audit|analyze|analyse|check|review|report|show|tell|what is|what's|how is|how are|performance|stats|breakdown|trend|compare|explain|why|roas|ctr|cpm|spend|صرفت|جابت|شوفلي|كام|اليوم|انهردا|الحمله|الحملة|بيانات|أداء|ادا|نتايج|نتائج|تقرير|إيه|ايه|عامله|عامل|شغاله|شغال|كيف|اتوقف|فين|مين|امتى|الميزانيه|الميزانية|البادجت|budget|يومي|daily|حلل|تحليل|سيجمنت|جمهور|اوديانس|الحسابات|الحملات|المجموعات)\b/.test(t)) return "analyze";
+
+  // Plan
+  if (/\b(plan|strategy|recommend|suggest|structure|approach|best way|how should|what should|advise|idea|next step|خطه|خطة|استراتيجيه|استراتيجية|نصيحه|نصيحة|ايه الافضل|ايه احسن|اقترح|افضل طريقه|باير بيرسونا|buyer persona|سيجمنتات|segments)\b/.test(t)) return "plan";
+
+  return "chat";
+}
+```
+
+===================================================================
+SECTION 2 — FIX BRAIN SAVE (AI claims to save but doesn't)
+===================================================================
+
+Problem: When AI says "حدث عقلك" it should ALWAYS call save_account_brain 
+tool with fresh data — not just write JSON text.
+
+In the system prompt, add this instruction:
+
+"BRAIN UPDATE RULE: When user says حدث عقلك or any brain update request:
+1. First call get_account_overview to get fresh KPIs
+2. Then call get_campaigns to get campaign list  
+3. Then IMMEDIATELY call save_account_brain with the real data
+4. Never write JSON in text — always use the actual tool call
+5. Confirm with exact numbers that were saved"
+
+Also add "save_account_brain" to BOTH analyze and execute TOOL_GROUPS 
+so it's always available.
+
+===================================================================
+SECTION 3 — FIX DAILY BUDGET IN BRAIN SCHEMA
+===================================================================
+
+Problem: AI doesn't know the daily budget of active campaigns because 
+it's not stored in the brain.
+
+In the accountBrains schema, the winningCampaigns jsonb field should store:
+```typescript
+interface WinningCampaign {
+  id: string;
+  name: string;
+  status: string;
+  daily_budget: number;      // ADD THIS
+  lifetime_budget: number;   // ADD THIS  
+  roas: number;
+  spend: number;
+  purchases: number;
+  ctr: number;
+  cpm: number;
+}
+```
+
+In the save_account_brain tool handler, when saving campaigns,
+make sure to include daily_budget and lifetime_budget from the 
+campaign/adset data fetched from Meta API.
+
+Also add these fields to kpiSnapshot:
+```typescript
+interface KpiSnapshot {
+  spend: number;
+  roas: number;
+  ctr: number;
+  cpm: number;
+  cpc: number;
+  purchases: number;
+  reach: number;
+  frequency: number;
+  active_campaigns: number;    // ADD
+  paused_campaigns: number;    // ADD  
+  total_campaigns: number;     // ADD
+  top_campaign_name: string;   // ADD
+  top_campaign_daily_budget: number;  // ADD
+  top_campaign_roas: number;   // ADD
+  date_range: string;          // ADD
+}
+```
+
+===================================================================
+SECTION 4 — FIX CAMPAIGN EXECUTION (AI writes text instead of calling tool)
+===================================================================
+
+Problem: When user says "نفذ" or "اعمل حملة", AI writes a JSON block 
+in text instead of calling execute_campaign_template tool.
+
+Add this to the system prompt EXECUTE mode instruction:
+
+"EXECUTE MODE RULES — CRITICAL:
+- NEVER write JSON in your response text
+- NEVER simulate or describe tool calls  
+- ALWAYS call the actual tool directly
+- If user says نفذ after a plan: call execute_campaign_template immediately
+- If campaign creation fails: report the EXACT error from Meta API
+- Never say 'تم بنجاح' unless you received a real campaign_id from Meta API
+- A real success always includes a numeric campaign_id like 12345678901234"
+
+===================================================================
+SECTION 5 — FIX REPORTS PAGE: Date Ranges
+===================================================================
+
+Problem: Custom date range not working. Missing: Last 90 days, This Year, Last 365 days.
+
+In the Reports component, replace the date range selector with:
+
+```typescript
+const DATE_PRESETS = [
+  { label: "اليوم", value: "today", days: 0 },
+  { label: "أمس", value: "yesterday", days: 1 },
+  { label: "آخر 7 أيام", value: "last_7", days: 7 },
+  { label: "آخر 30 يوم", value: "last_30", days: 30 },
+  { label: "آخر 90 يوم", value: "last_90", days: 90 },
+  { label: "آخر 365 يوم", value: "last_365", days: 365 },
+  { label: "هذا الشهر", value: "this_month", days: -1 },
+  { label: "هذه السنة", value: "this_year", days: -2 },
+  { label: "مخصص", value: "custom", days: -3 },
+];
+
+function getDateRange(preset: string, customFrom?: string, customTo?: string) {
+  const today = new Date();
+  const format = (d: Date) => d.toISOString().split("T")[0];
+  
+  switch(preset) {
+    case "today":
+      return { since: format(today), until: format(today) };
+    case "yesterday":
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      return { since: format(yesterday), until: format(yesterday) };
+    case "this_month":
+      return { since: format(new Date(today.getFullYear(), today.getMonth(), 1)), until: format(today) };
+    case "this_year":
+      return { since: `${today.getFullYear()}-01-01`, until: format(today) };
+    case "custom":
+      return { since: customFrom!, until: customTo! };
+    default:
+      const days = DATE_PRESETS.find(p => p.value === preset)?.days ?? 30;
+      const from = new Date(today);
+      from.setDate(today.getDate() - days);
+      return { since: format(from), until: format(today) };
+  }
+}
+```
+
+Show custom date pickers (from/to) only when "مخصص" is selected.
+Make sure the selected date range is passed correctly to ALL API calls in the reports page.
+
+===================================================================
+SECTION 6 — REDESIGN REPORTS PAGE: Professional Charts & PDF
+===================================================================
+
+The reports page needs a complete visual redesign. Here is the exact layout:
+
+**TOP BAR:**
+- Account name + date range selector (presets + custom)
+- "تحميل PDF" button (right side, gold color)
+- "تحديث البيانات" button
+
+**KPI CARDS ROW (4 cards):**
+Each card has: icon, label, value, % change vs previous period
+
+```
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│ 💰 الإنفاق  │ │ 📈 ROAS     │ │ 🛒 مشتريات  │ │ 👁 CPM      │
+│ 40,726 EGP  │ │ 6.45x       │ │ 97          │ │ 180 EGP     │
+│ +12% ▲      │ │ +5% ▲       │ │ -3% ▼       │ │ +8% ▲       │
+└─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘
+```
+
+**CHARTS ROW 1 (2 charts side by side):**
+
+Left — "الإنفاق اليومي vs الإيرادات" — Area chart (dual axis)
+- X: dates
+- Y1: spend (gold line)
+- Y2: revenue/ROAS (blue line)
+
+Right — "توزيع الإنفاق على الحملات" — Horizontal bar chart
+- Top 10 campaigns by spend
+- Color coded: green = ROAS > 6, yellow = 4-6, red = < 4
+
+**CHARTS ROW 2 (3 charts):**
+
+Left — "التوزيع حسب الجنس" — Donut chart
+- Male vs Female with percentages
+
+Middle — "التوزيع حسب العمر" — Bar chart  
+- Age groups: 18-24, 25-34, 35-44, 45-54, 55+
+
+Right — "أفضل أيام الأداء" — Heatmap or bar chart
+- Days of week vs performance
+
+**CAMPAIGNS TABLE:**
+Columns: اسم الحملة | الحالة | الإنفاق | ROAS | CTR | CPM | المشتريات | الميزانية اليومية
+- Color code ROAS: green > 6x, yellow 4-6x, red < 4x
+- Status badge: ACTIVE (green), PAUSED (gray)
+- Sortable columns
+
+**PDF EXPORT:**
+When user clicks "تحميل PDF":
+- Generate a clean PDF with:
+  - Header: logo area + account name + date range + generation date
+  - KPI cards section
+  - All charts (as images)
+  - Campaigns table
+  - Footer: "تقرير معد بواسطة JOEX Dashboard"
+- Use html2canvas + jsPDF to capture and export
+- Filename: `{account_name}_report_{date}.pdf`
+
+Use recharts for all charts.
+Dark theme matching the current dashboard (#0a0a0a background, gold #D4AF37 accents).
+Arabic RTL layout throughout.
+
+Install required packages:
+- recharts (already installed)
+- html2canvas
+- jspdf
+
+===================================================================
+IMPLEMENTATION ORDER
+===================================================================
+
+1. Section 1 — Fix detectTaskMode (most critical — fixes everything)
+2. Section 2 — Fix brain save instruction in system prompt
+3. Section 3 — Fix brain schema to include daily_budget
+4. Section 4 — Fix execute mode system prompt
+5. Section 5 — Fix date ranges in reports
+6. Section 6 — Redesign reports page
+
+After each section: build and confirm no TypeScript errors.
+After all sections: restart both servers and test:
+- Say "حدث عقلك" → should call get_account_overview + save_account_brain
+- Say "الميزانية اليومية للحملة الشغالة" → should call get_adsets and return real number
+- Say "اعمل حملة كاتلوج" then "نفذ" → should call execute_campaign_template
+- Check reports page has all date presets working
+- Check PDF download works
