@@ -5,7 +5,7 @@ import { useDateStore } from "@/store/dateStore";
 import { useAdAccounts, useMe } from "@/hooks/useMeta";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Calendar } from "@/components/ui/calendar";
 import { CheckCircle2, LogOut, CalendarIcon, Bug, Menu } from "lucide-react";
 import { useLocation } from "wouter";
@@ -20,6 +20,9 @@ import {
 } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
+
+// Meta API hard limit: 37 months back from today (use 36 to be safe)
+const META_EARLIEST = subMonths(new Date(), 36);
 
 const PRESETS: { label: string; since: () => string; until: () => string }[] = [
   {
@@ -84,13 +87,12 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
   },
   {
     label: "Maximum",
-    since: () => format(subMonths(new Date(), 36), "yyyy-MM-dd"),
+    since: () => format(META_EARLIEST, "yyyy-MM-dd"),
     until: () => format(new Date(), "yyyy-MM-dd"),
   },
 ];
 
-// Meta API hard limit: 37 months back from today
-const META_EARLIEST = subMonths(new Date(), 36);
+const ALL_ITEMS = [...PRESETS.map((p) => p.label), "Custom"];
 
 interface TopbarProps {
   onToggleDebug?: () => void;
@@ -103,7 +105,9 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
   const { accounts, setAccounts, selectedAccountId, selectAccount } = useAccountStore();
   const { since, until, preset, setDateRange } = useDateStore();
   const [, setLocation] = useLocation();
-  const [calOpen, setCalOpen] = useState(false);
+
+  // Custom date dialog
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [calRange, setCalRange] = useState<DateRange | undefined>({
     from: new Date(since),
     to: new Date(until),
@@ -123,7 +127,9 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
 
   const handlePreset = (label: string) => {
     if (label === "Custom") {
-      setCalOpen(true);
+      // Seed the calendar with the current range so it opens on the right month
+      setCalRange({ from: new Date(since), to: new Date(until) });
+      setDialogOpen(true);
       return;
     }
     const p = PRESETS.find((x) => x.label === label);
@@ -133,17 +139,65 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
 
   const applyCustomRange = () => {
     if (calRange?.from && calRange?.to) {
-      const s = format(calRange.from, "yyyy-MM-dd");
-      const u = format(calRange.to, "yyyy-MM-dd");
-      setDateRange(s, u, "Custom");
-      setCalOpen(false);
+      setDateRange(
+        format(calRange.from, "yyyy-MM-dd"),
+        format(calRange.to, "yyyy-MM-dd"),
+        "Custom",
+      );
+      setDialogOpen(false);
     }
   };
 
-  const allSelectItems = [...PRESETS.map((p) => p.label), "Custom"];
+  // Select display value — show "Custom (since → until)" when active
+  const selectValue = preset === "Custom" ? "Custom" : preset;
 
   return (
     <div className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-20">
+
+      {/* ── Custom date range dialog ────────────────────────────────────── */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="bg-card border-border p-0 w-auto max-w-fit">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+              <CalendarIcon className="h-4 w-4 text-primary" />
+              Custom Date Range
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-2">
+            <Calendar
+              mode="range"
+              selected={calRange}
+              onSelect={setCalRange}
+              numberOfMonths={2}
+              defaultMonth={calRange?.from ?? new Date(since)}
+              fromMonth={META_EARLIEST}
+              toDate={new Date()}
+              className="rounded-md"
+            />
+          </div>
+          <DialogFooter className="px-5 pb-5 pt-3 border-t border-border gap-2">
+            <div className="text-xs text-muted-foreground flex-1">
+              {calRange?.from && calRange?.to
+                ? `${format(calRange.from, "MMM d, yyyy")} → ${format(calRange.to, "MMM d, yyyy")}`
+                : calRange?.from
+                ? `${format(calRange.from, "MMM d, yyyy")} → pick end date`
+                : "Pick a start date"}
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={applyCustomRange}
+              disabled={!calRange?.from || !calRange?.to}
+              className="bg-primary text-black hover:bg-primary/90"
+            >
+              Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Main row ──────────────────────────────────────────────────────── */}
       <div className="h-14 px-3 md:px-4 flex items-center gap-2 md:gap-3">
 
@@ -156,8 +210,9 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
           <Menu className="h-5 w-5" />
         </button>
 
-        {/* ── Left controls (desktop/tablet) ──────────────────────────── */}
+        {/* ── Left controls (desktop) ──────────────────────────────────── */}
         <div className="hidden sm:flex items-center gap-2 flex-1 min-w-0">
+
           {/* Account selector */}
           <Select value={selectedAccountId || ""} onValueChange={selectAccount}>
             <SelectTrigger
@@ -176,58 +231,35 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
             </SelectContent>
           </Select>
 
-          {/* Date preset selector — all 13 options */}
-          <Popover open={calOpen} onOpenChange={setCalOpen}>
-            <Select value={preset} onValueChange={handlePreset}>
-              <SelectTrigger
-                className="w-[150px] lg:w-[185px] bg-background border-border text-sm"
-                data-testid="select-date-preset"
-              >
-                <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground mr-1 flex-shrink-0" />
-                <SelectValue placeholder="Date range" />
-              </SelectTrigger>
-              <SelectContent>
-                {allSelectItems.map((label) => (
-                  <SelectItem key={label} value={label}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Date preset selector */}
+          <Select value={selectValue} onValueChange={handlePreset}>
+            <SelectTrigger
+              className="w-[155px] lg:w-[190px] bg-background border-border text-sm"
+              data-testid="select-date-preset"
+            >
+              <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground mr-1 flex-shrink-0" />
+              <SelectValue placeholder="Date range" />
+            </SelectTrigger>
+            <SelectContent>
+              {ALL_ITEMS.map((label) => (
+                <SelectItem key={label} value={label}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-            {/* Calendar popover — triggered when Custom is selected */}
-            <PopoverContent className="w-auto p-0 bg-card border-border" align="start">
-              <Calendar
-                mode="range"
-                selected={calRange}
-                onSelect={setCalRange}
-                numberOfMonths={2}
-                defaultMonth={new Date(since)}
-                fromMonth={META_EARLIEST}
-                toDate={new Date()}
-                className="rounded-md"
-              />
-              <div className="flex justify-end gap-2 p-3 border-t border-border">
-                <Button variant="ghost" size="sm" onClick={() => setCalOpen(false)}>Cancel</Button>
-                <Button size="sm" onClick={applyCustomRange} disabled={!calRange?.from || !calRange?.to}>
-                  Apply
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          {/* Active date display — desktop only */}
+          {/* Active date display */}
           <span className="text-xs text-muted-foreground hidden xl:block font-mono bg-background border border-border px-2 py-1 rounded whitespace-nowrap">
             {since} → {until}
           </span>
         </div>
 
-        {/* Spacer — on mobile, push right controls to end */}
+        {/* Spacer — mobile */}
         <div className="flex-1 sm:hidden" />
 
         {/* ── Right controls ───────────────────────────────────────────── */}
         <div className="flex items-center gap-1 md:gap-2">
-          {/* User badge */}
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground bg-background px-2 md:px-3 py-1.5 rounded-full border border-border">
             <CheckCircle2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
             <span className="hidden md:block truncate max-w-[100px] lg:max-w-[140px] text-xs">
@@ -235,7 +267,6 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
             </span>
           </div>
 
-          {/* Debug toggle — hidden on mobile */}
           {onToggleDebug && (
             <Button
               variant="ghost"
@@ -249,7 +280,6 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
             </Button>
           )}
 
-          {/* Logout */}
           <Button
             variant="outline"
             size="sm"
@@ -263,7 +293,7 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
         </div>
       </div>
 
-      {/* ── Mobile second row — account + date ────────────────────────────── */}
+      {/* ── Mobile second row ─────────────────────────────────────────────── */}
       <div className="sm:hidden px-3 pb-2.5 flex gap-2">
         <Select value={selectedAccountId || ""} onValueChange={selectAccount}>
           <SelectTrigger
@@ -282,40 +312,18 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
           </SelectContent>
         </Select>
 
-        {/* Mobile date selector */}
-        <Popover open={calOpen} onOpenChange={setCalOpen}>
-          <Select value={preset} onValueChange={handlePreset}>
-            <SelectTrigger className="w-[130px] bg-background border-border text-xs h-9">
-              <SelectValue placeholder="Range" />
-            </SelectTrigger>
-            <SelectContent>
-              {allSelectItems.map((label) => (
-                <SelectItem key={label} value={label}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <PopoverContent className="w-auto p-0 bg-card border-border" align="end">
-            <Calendar
-              mode="range"
-              selected={calRange}
-              onSelect={setCalRange}
-              numberOfMonths={1}
-              defaultMonth={new Date(since)}
-              fromMonth={META_EARLIEST}
-              toDate={new Date()}
-              className="rounded-md"
-            />
-            <div className="flex justify-end gap-2 p-3 border-t border-border">
-              <Button variant="ghost" size="sm" onClick={() => setCalOpen(false)}>Cancel</Button>
-              <Button size="sm" onClick={applyCustomRange} disabled={!calRange?.from || !calRange?.to}>
-                Apply
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+        <Select value={selectValue} onValueChange={handlePreset}>
+          <SelectTrigger className="w-[130px] bg-background border-border text-xs h-9">
+            <SelectValue placeholder="Range" />
+          </SelectTrigger>
+          <SelectContent>
+            {ALL_ITEMS.map((label) => (
+              <SelectItem key={label} value={label}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );
