@@ -28,39 +28,69 @@ import {
 // ── Date presets ──────────────────────────────────────────────────────────────
 
 const DATE_PRESETS = [
-  { label: "اليوم",          value: "today",      days: 0  },
-  { label: "أمس",            value: "yesterday",  days: 1  },
-  { label: "آخر 7 أيام",    value: "last_7",     days: 7  },
-  { label: "آخر 30 يوم",    value: "last_30",    days: 30 },
-  { label: "آخر 90 يوم",    value: "last_90",    days: 90 },
-  { label: "آخر 365 يوم",   value: "last_365",   days: 365},
-  { label: "هذا الشهر",      value: "this_month", days: -1 },
-  { label: "هذه السنة",      value: "this_year",  days: -2 },
-  { label: "مخصص",           value: "custom",     days: -3 },
+  { label: "اليوم",               value: "today"           },
+  { label: "أمس",                 value: "yesterday"       },
+  { label: "اليوم وأمس",          value: "today_yesterday" },
+  { label: "آخر 7 أيام",         value: "last_7"          },
+  { label: "آخر 14 يوم",         value: "last_14"         },
+  { label: "آخر 28 يوم",         value: "last_28"         },
+  { label: "آخر 30 يوم",         value: "last_30"         },
+  { label: "هذا الأسبوع",         value: "this_week"       },
+  { label: "الأسبوع الماضي",      value: "last_week"       },
+  { label: "هذا الشهر",           value: "this_month"      },
+  { label: "الشهر الماضي",        value: "last_month"      },
+  { label: "الحد الأقصى",         value: "maximum"         },
+  { label: "مخصص",                value: "custom"          },
 ];
 
 function fmt(d: Date): string { return d.toISOString().split("T")[0]; }
 
-function getDateRange(preset: string, customFrom?: string, customTo?: string): { since: string; until: string } {
+function daysAgo(n: number): Date { const d = new Date(); d.setDate(d.getDate() - n); return d; }
+
+function getDateRange(preset: string, customFrom: string, customTo: string): { since: string; until: string } {
   const today = new Date();
   switch (preset) {
     case "today":
       return { since: fmt(today), until: fmt(today) };
-    case "yesterday": {
-      const y = new Date(today); y.setDate(today.getDate() - 1);
-      return { since: fmt(y), until: fmt(y) };
+    case "yesterday":
+      return { since: fmt(daysAgo(1)), until: fmt(daysAgo(1)) };
+    case "today_yesterday":
+      return { since: fmt(daysAgo(1)), until: fmt(today) };
+    case "last_7":
+      return { since: fmt(daysAgo(7)), until: fmt(today) };
+    case "last_14":
+      return { since: fmt(daysAgo(14)), until: fmt(today) };
+    case "last_28":
+      return { since: fmt(daysAgo(28)), until: fmt(today) };
+    case "last_30":
+      return { since: fmt(daysAgo(30)), until: fmt(today) };
+    case "this_week": {
+      const dow = today.getDay(); // 0=Sun
+      const monday = new Date(today); monday.setDate(today.getDate() - ((dow + 6) % 7));
+      return { since: fmt(monday), until: fmt(today) };
+    }
+    case "last_week": {
+      const dow = today.getDay();
+      const lastMon = new Date(today); lastMon.setDate(today.getDate() - ((dow + 6) % 7) - 7);
+      const lastSun = new Date(lastMon); lastSun.setDate(lastMon.getDate() + 6);
+      return { since: fmt(lastMon), until: fmt(lastSun) };
     }
     case "this_month":
       return { since: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), until: fmt(today) };
-    case "this_year":
-      return { since: `${today.getFullYear()}-01-01`, until: fmt(today) };
-    case "custom":
-      return { since: customFrom ?? fmt(today), until: customTo ?? fmt(today) };
-    default: {
-      const days = DATE_PRESETS.find((p) => p.value === preset)?.days ?? 30;
-      const from = new Date(today); from.setDate(today.getDate() - days);
-      return { since: fmt(from), until: fmt(today) };
+    case "last_month": {
+      const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const lastOfLastMonth  = new Date(today.getFullYear(), today.getMonth(), 0);
+      return { since: fmt(firstOfLastMonth), until: fmt(lastOfLastMonth) };
     }
+    case "maximum":
+      return { since: "2020-01-01", until: fmt(today) };
+    case "custom": {
+      const s = customFrom && customFrom.length === 10 ? customFrom : fmt(daysAgo(30));
+      const u = customTo   && customTo.length   === 10 ? customTo   : fmt(today);
+      return { since: s, until: u };
+    }
+    default:
+      return { since: fmt(daysAgo(30)), until: fmt(today) };
   }
 }
 
@@ -132,8 +162,8 @@ export default function Reports() {
 
   // ── Local date state ──────────────────────────────────────────────────────
   const [preset, setPreset]         = useState("last_30");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo]     = useState("");
+  const [customFrom, setCustomFrom] = useState(() => fmt(daysAgo(30)));
+  const [customTo, setCustomTo]     = useState(() => fmt(new Date()));
   const [presetOpen, setPresetOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
 
@@ -445,12 +475,14 @@ export default function Reports() {
               <ChevronDown className="h-3.5 w-3.5 opacity-60" />
             </Button>
             {presetOpen && (
-              <div className="absolute right-0 top-10 z-50 bg-[#161622] border border-white/10 rounded-xl shadow-2xl w-44 py-1 overflow-hidden">
-                {DATE_PRESETS.map((p) => (
+              <div className="absolute right-0 top-10 z-50 bg-[#161622] border border-white/10 rounded-xl shadow-2xl w-52 py-1 overflow-hidden">
+                {DATE_PRESETS.map((p, i) => (
                   <button
                     key={p.value}
                     dir="rtl"
-                    className={`w-full text-right px-4 py-2 text-sm hover:bg-white/5 transition-colors ${preset === p.value ? "text-primary font-semibold" : "text-foreground"}`}
+                    className={`w-full text-right px-4 py-2 text-sm hover:bg-white/5 transition-colors ${
+                      preset === p.value ? "text-primary font-semibold bg-primary/5" : "text-foreground"
+                    } ${p.value === "custom" ? "border-t border-white/10 mt-1" : ""}`}
                     onClick={() => { setPreset(p.value); setPresetOpen(false); }}
                   >
                     {p.label}
