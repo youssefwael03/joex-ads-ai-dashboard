@@ -1,0 +1,164 @@
+You have full access to this Replit project.
+
+Fix all the following issues in one go. Complete each part 
+fully before moving to the next. Show before/after code 
+for every change.
+
+═══════════════════════════════════════
+PART 1 — FULL CODEBASE AUDIT
+═══════════════════════════════════════
+Before making any changes:
+1. List every broken or partially working feature
+2. List every bug you find
+3. List every file over 300 lines with multiple responsibilities
+4. Rate each major area 1-10:
+   - AI Assistant
+   - PDF Reports  
+   - Instagram Insights
+   - Meta API Integration
+   - Campaign Creation
+   - UI/UX
+
+═══════════════════════════════════════
+PART 2 — AI ASSISTANT FIXES
+═══════════════════════════════════════
+1. DISABLE GROQ FOR ANALYZE MODE
+   Groq hallucinates data in analyze mode.
+   When mode === "analyze" → skip Groq, start from Mistral.
+   Groq only used for "chat" mode.
+
+2. FIX PAUSED CAMPAIGN LOGIC
+   Add to system prompt under EXECUTION RULES:
+   "For paused campaigns with spend = 0: never call them 
+   a loss. State they have no spend data and ask if user 
+   wants to review them before any recommendation."
+
+3. VERIFY SYSTEM PROMPT IS APPLIED CORRECTLY
+   Confirm the new system prompt is active and injecting 
+   brainSection correctly.
+
+═══════════════════════════════════════
+PART 3 — PDF REPORT COMPLETE OVERHAUL
+═══════════════════════════════════════
+1. ARABIC TEXT FIX
+   Account name shows garbage (þžþôþ´þèþàþß).
+   Download and embed "Noto Sans Arabic" from Google Fonts.
+   Apply to ALL text in the PDF.
+   Test by rendering "جاكاردينا للنسيج" correctly.
+
+2. ADD 3 CHARTS
+   Use recharts → capture with html2canvas → embed in PDF:
+   a) ROAS trend line chart — last 30 days
+   b) Spend vs Revenue bar chart — top 5 active campaigns
+   c) Purchase funnel: ViewContent → ATC → Checkout → Purchase
+
+3. CAMPAIGNS FILTER
+   Only show campaigns where spend > 0.
+   Add footnote: "X paused campaigns with 0 spend not included"
+
+4. PROFESSIONAL LAYOUT
+   - Cover page: dark navy (#0a0f1e), gold accent, JOEX title,
+     account name, date range, currency
+   - Each section starts on a new page
+   - Section headers: navy background + gold left border
+   - KPI cards: 4-column grid
+   - Page numbers at bottom of every page
+
+5. FIX ALL ENCODING ARTIFACTS
+   Search entire PDF code for any Arabic text rendering
+   and ensure proper encoding everywhere.
+
+═══════════════════════════════════════
+PART 4 — INSTAGRAM INSIGHTS FIX
+═══════════════════════════════════════
+1. Find why Instagram tab shows blank when Facebook 
+   page is connected
+2. Fix the page token retrieval flow
+3. If Instagram Business Account not connected → show 
+   clear error message explaining what user needs to do
+4. Add connection status indicator at top of tab
+
+═══════════════════════════════════════
+PART 5 — CAMPAIGN CREATION FIX
+═══════════════════════════════════════
+1. ADD DETAILED ERROR LOGGING
+   When Meta API returns error, show in chat:
+   "Meta API rejected this payload: [payload]
+    Reason: [exact error from Meta including error_user_msg]"
+
+2. FIX CAMPAIGN CREATION PAYLOAD
+   Minimum valid campaign payload:
+   {
+     name: "campaign name",
+     objective: "OUTCOME_SALES",
+     status: "PAUSED",
+     special_ad_categories: [],
+     buying_type: "AUCTION"
+   }
+
+   Minimum valid ad set payload:
+   {
+     name: "ad set name",
+     campaign_id: "campaign_id",
+     daily_budget: amount_in_cents (500 EGP = 50000),
+     billing_event: "IMPRESSIONS",
+     optimization_goal: "OFFSITE_CONVERSIONS",
+     bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+     targeting: {
+       geo_locations: { countries: ["EG"] },
+       age_min: 18,
+       age_max: 65
+     },
+     status: "PAUSED",
+     promoted_object: {
+       pixel_id: "FETCHED_PIXEL_ID",
+       custom_event_type: "PURCHASE"
+     }
+   }
+
+3. ADD PRE-FLIGHT VALIDATION
+   Before any Meta API creation call:
+   - Validate all required fields are present
+   - Validate budget is converted to cents (EGP × 100)
+   - Validate geo_locations format
+   - Validate objective is valid Meta objective
+   - If validation fails → tell user exactly what is wrong
+     before attempting the API call
+
+4. AUTO-FETCH PIXEL ID
+   Before creating any ad set:
+   - Automatically fetch account pixel ID from Meta API
+   - Store in account brain after first fetch
+   - Always use this stored pixel ID in promoted_object
+
+═══════════════════════════════════════
+PART 6 — GENERAL CODE CLEANUP
+═══════════════════════════════════════
+1. Split any file over 300 lines into focused modules
+2. Remove dead code:
+   - "claude" from VALID_PROVIDERS
+   - Commented-out blocks over 10 lines
+   - Unused imports
+3. Fix duplicate workflow port conflict on port 8080
+4. Add error boundaries to all silent-fail features:
+   Instagram, Leads, Catalog → show clear error instead 
+   of blank page
+
+═══════════════════════════════════════
+PART 7 — FINAL VERIFICATION
+═══════════════════════════════════════
+After all changes:
+1. Restart frontend and backend
+2. Confirm:
+   - AI analyze mode uses Mistral and returns real data
+   - Groq only handles chat mode
+   - PDF generates with correct Arabic text and 3 charts
+   - Campaign creation works with valid payload
+   - Instagram tab shows data or clear error message
+   - No port conflicts on startup
+3. Give me a summary table:
+   | Feature | Status Before | Status After | Notes |
+   For every item touched in this prompt.
+
+Do not skip any part. Complete each section fully 
+before moving to the next.

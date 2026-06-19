@@ -22,10 +22,16 @@ export interface AIResponse {
 }
 
 // Fixed provider chain — tried in order, auto-fallback on error
-// Gemini removed: free tier has limit: 0 and will never work
 const PROVIDER_CHAIN: ProviderName[] = [
-  "claude",
   "groq",
+  "mistral",
+  "cloudflare",
+  "deepseek",
+  "openrouter_free",
+];
+
+// Analyze mode skips Groq — Groq hallucinates data when it has no real tool results
+const ANALYZE_CHAIN: ProviderName[] = [
   "mistral",
   "cloudflare",
   "deepseek",
@@ -34,7 +40,6 @@ const PROVIDER_CHAIN: ProviderName[] = [
 
 // Fixed models for each provider
 const PROVIDER_MODELS: Record<ProviderName, string> = {
-  claude:          "claude-haiku-4-5-20251001",
   groq:            "llama-3.3-70b-versatile",
   mistral:         "mistral-small-latest",
   cloudflare:      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
@@ -44,7 +49,6 @@ const PROVIDER_MODELS: Record<ProviderName, string> = {
 
 // Daily token limits per provider
 export const PROVIDER_LIMITS: Record<ProviderName, number> = {
-  claude:          1_000_000,
   groq:            500_000,
   mistral:         1_000_000,
   cloudflare:      1_000_000,
@@ -52,36 +56,8 @@ export const PROVIDER_LIMITS: Record<ProviderName, number> = {
   openrouter_free: 1_000_000,
 };
 
-// ── Claude model discovery ─────────────────────────────────────────────────────
-// Start with known-good model; try to confirm/update from the integration's /models list at startup
-
-let claudeModel = "claude-haiku-4-5-20251001";
-
-async function initClaudeModel(): Promise<void> {
-  try {
-    const baseURL = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
-    const apiKey  = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
-    if (!baseURL || !apiKey) return;
-    const res = await fetch(`${baseURL}/models`, {
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (res.ok) {
-      const data = await res.json() as any;
-      const first: string | undefined = data?.data?.[0]?.id;
-      if (first) claudeModel = first;
-    }
-  } catch {
-    // keep default
-  }
-  console.log("[claude] model:", claudeModel);
-}
-
 // ── OpenRouter startup check ───────────────────────────────────────────────────
 console.log("[openrouter] key set:", !!process.env.OPENROUTER_API_KEY);
-
-// Non-blocking model discovery
-initClaudeModel().catch(() => {});
 
 // Track daily usage per provider (resets at midnight)
 const dailyUsage: Record<ProviderName, { tokens: number; date: string }> = {} as any;
@@ -126,14 +102,17 @@ export function getProviderStatus(): Record<
 }
 
 // Main function — tries providers in order, auto-fallback on error
+// mode="analyze" uses ANALYZE_CHAIN (skips Groq to prevent hallucinations)
 export async function callWithFallback(
   messages: AIMessage[],
   tools: any[],
   systemPrompt: string,
+  mode?: string,
 ): Promise<AIResponse> {
   const errors: string[] = [];
+  const chain = mode === "analyze" ? ANALYZE_CHAIN : PROVIDER_CHAIN;
 
-  for (const provider of PROVIDER_CHAIN) {
+  for (const provider of chain) {
     if (!isProviderAvailable(provider)) {
       errors.push(`${provider}: daily limit reached`);
       continue;
@@ -162,91 +141,6 @@ export async function callProvider(
   systemPrompt: string,
 ): Promise<AIResponse> {
   const model = PROVIDER_MODELS[provider];
-
-  // ── Claude via Replit AI Integration ──────────────────────────────────────
-  if (provider === "claude") {
-    const client = new Anthropic({
-      baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
-      apiKey:  process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
-    });
-
-    // Use dynamically discovered model (resolved at startup from /models endpoint)
-    const resolvedModel = claudeModel;
-
-    // Convert OAI tools → Anthropic format
-    const anthropicTools = tools.length > 0
-      ? tools.map((t: any) => ({
-          name:         t.function.name,
-          description:  t.function.description,
-          input_schema: t.function.parameters,
-        }))
-      : undefined;
-
-    // Convert AIMessage[] → Anthropic message format
-    const anthropicMessages: any[] = [];
-    for (const msg of messages) {
-      if (msg.role === "assistant" && msg.tool_calls?.length) {
-        const content: any[] = [];
-        if (msg.content) content.push({ type: "text", text: msg.content });
-        for (const tc of msg.tool_calls) {
-          content.push({
-            type:  "tool_use",
-            id:    tc.id,
-            name:  tc.function.name,
-            input: (() => { try { return JSON.parse(tc.function.arguments || "{}"); } catch { return {}; } })(),
-          });
-        }
-        anthropicMessages.push({ role: "assistant", content });
-      } else if (msg.role === "tool") {
-        const last = anthropicMessages[anthropicMessages.length - 1];
-        const toolResult = {
-          type:        "tool_result",
-          tool_use_id: msg.tool_call_id,
-          content:     msg.content ?? "",
-        };
-        if (last?.role === "user" && Array.isArray(last.content)) {
-          last.content.push(toolResult);
-        } else {
-          anthropicMessages.push({ role: "user", content: [toolResult] });
-        }
-      } else if (msg.role === "user" || msg.role === "assistant") {
-        anthropicMessages.push({ role: msg.role, content: msg.content ?? "" });
-      }
-    }
-
-    const response = await client.messages.create({
-      model:      resolvedModel,
-      max_tokens: 4000,
-      system:     systemPrompt,
-      messages:   anthropicMessages,
-      tools:      anthropicTools as any,
-    });
-
-    const content = response.content
-      .filter((b: any) => b.type === "text")
-      .map((b: any) => b.text)
-      .join("");
-
-    const toolCalls = response.content
-      .filter((b: any) => b.type === "tool_use")
-      .map((b: any) => ({
-        id:   b.id,
-        type: "function" as const,
-        function: {
-          name:      b.name,
-          arguments: JSON.stringify(b.input ?? {}),
-        },
-      }));
-
-    return {
-      content,
-      provider,
-      model:       resolvedModel,
-      tokens:      response.usage.input_tokens + response.usage.output_tokens,
-      toolCalls:   toolCalls.length > 0 ? toolCalls : undefined,
-      finishReason: response.stop_reason === "end_turn" ? "stop" : (response.stop_reason ?? undefined),
-    };
-  }
 
   // ── Groq ───────────────────────────────────────────────────────────────────
   if (provider === "groq") {

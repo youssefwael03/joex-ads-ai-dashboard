@@ -165,9 +165,20 @@ function formatBrainContext(brain: BrainRow): string {
 }
 
 // ── Provider chain ────────────────────────────────────────────────────────────
-// Multi-provider fallback: claude → gemini → groq → mistral → cloudflare → deepseek → openrouter_free
-// See providers.ts for full implementation.
+// Multi-provider fallback: groq → mistral → cloudflare → deepseek → openrouter_free
+// Analyze mode uses mistral-first chain (skips groq) — see providers.ts.
 
+// ── Meta error helper ──────────────────────────────────────────────────────────
+
+function buildMetaError(err: any): string {
+  if (!err || typeof err !== "object") return String(err);
+  const parts = [
+    err.error_user_title ? String(err.error_user_title) : null,
+    err.error_user_msg   ? String(err.error_user_msg)   : (err.message ? String(err.message) : null),
+    err.code             ? `(Meta code: ${err.code}${err.error_subcode ? `.${err.error_subcode}` : ""})` : null,
+  ].filter(Boolean);
+  return parts.join(" — ") || JSON.stringify(err);
+}
 
 const META_BASE = "https://graph.facebook.com/v22.0";
 
@@ -449,6 +460,15 @@ const TOOLS: ToolDef[] = [
         },
         start_time: { type: "string", description: "ISO 8601 start time (optional)" },
         end_time: { type: "string", description: "ISO 8601 end time (optional)" },
+        bid_strategy: {
+          type: "string",
+          enum: ["LOWEST_COST_WITHOUT_CAP", "LOWEST_COST_WITH_BID_CAP", "COST_CAP", "MINIMUM_ROAS"],
+          description: "Bid strategy (default: LOWEST_COST_WITHOUT_CAP)",
+        },
+        promoted_object: {
+          type: "object",
+          description: "Required for OUTCOME_SALES / OUTCOME_LEADS: { pixel_id: string, custom_event_type: string } e.g. { pixel_id: '1234', custom_event_type: 'PURCHASE' }",
+        },
       },
       required: ["campaign_id", "name", "billing_event", "optimization_goal"],
     },
@@ -1008,6 +1028,10 @@ const TOOLS: ToolDef[] = [
           type: "object",
           description: "Additional targeting fields to merge (interests, behaviors, custom_audiences, etc.)",
         },
+        pixel_id: {
+          type: "string",
+          description: "Pixel ID for OUTCOME_SALES / OUTCOME_LEADS ad sets. If omitted the backend auto-fetches the account's first pixel.",
+        },
         status: {
           type: "string",
           enum: ["PAUSED", "ACTIVE"],
@@ -1305,36 +1329,37 @@ async function executeTool(
           objective: input.objective,
           status: input.status ?? "PAUSED",
           special_ad_categories: input.special_ad_categories ?? [],
+          buying_type: "AUCTION",
         };
         if (input.daily_budget)    body.daily_budget    = String(Math.round(Number(input.daily_budget) * 100));
         if (input.lifetime_budget) body.lifetime_budget = String(Math.round(Number(input.lifetime_budget) * 100));
         const data = await metaPost(`/act_${accountId}/campaigns`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "pause_campaign": {
         const data = await metaPost(`/${input.campaign_id}`, token, { status: "PAUSED" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Paused: ${input.campaign_name}` } };
       }
 
       case "enable_campaign": {
         const data = await metaPost(`/${input.campaign_id}`, token, { status: "ACTIVE" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Enabled: ${input.campaign_name}` } };
       }
 
       case "set_campaign_budget": {
         const budgetCents = String(Math.round(Number(input.daily_budget) * 100));
         const data = await metaPost(`/${input.campaign_id}`, token, { daily_budget: budgetCents });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Budget set: ${input.daily_budget}` } };
       }
 
       case "delete_campaign": {
         const data = await metaDelete(`/${input.campaign_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.campaign_name}` } };
       }
 
@@ -1344,7 +1369,7 @@ async function executeTool(
           status_override: input.status_override ?? "PAUSED",
         };
         const data = await metaPost(`/${input.campaign_id}/copies`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
@@ -1353,7 +1378,7 @@ async function executeTool(
           ? "0"
           : String(Math.round(Number(input.spend_cap) * 100));
         const data = await metaPost(`/act_${accountId}`, token, { spend_cap: capValue });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: Number(input.spend_cap) === 0 ? "Spend cap removed" : `Spend cap set to ${input.spend_cap}` } };
       }
 
@@ -1381,36 +1406,38 @@ async function executeTool(
         };
         if (input.daily_budget)    body.daily_budget    = String(Math.round(Number(input.daily_budget) * 100));
         if (input.lifetime_budget) body.lifetime_budget = String(Math.round(Number(input.lifetime_budget) * 100));
-        if (input.targeting)       body.targeting       = typeof input.targeting === "string" ? input.targeting : JSON.stringify(input.targeting);
-        if (input.start_time)      body.start_time      = input.start_time;
-        if (input.end_time)        body.end_time        = input.end_time;
+        if (input.targeting)        body.targeting        = typeof input.targeting === "string" ? input.targeting : JSON.stringify(input.targeting);
+        if (input.start_time)       body.start_time       = input.start_time;
+        if (input.end_time)         body.end_time         = input.end_time;
+        if (input.bid_strategy)     body.bid_strategy     = input.bid_strategy;
+        if (input.promoted_object)  body.promoted_object  = typeof input.promoted_object === "string" ? input.promoted_object : JSON.stringify(input.promoted_object);
         const data = await metaPost(`/act_${accountId}/adsets`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "pause_adset": {
         const data = await metaPost(`/${input.adset_id}`, token, { status: "PAUSED" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Paused: ${input.adset_name}` } };
       }
 
       case "enable_adset": {
         const data = await metaPost(`/${input.adset_id}`, token, { status: "ACTIVE" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Enabled: ${input.adset_name}` } };
       }
 
       case "set_adset_budget": {
         const budgetCents = String(Math.round(Number(input.daily_budget) * 100));
         const data = await metaPost(`/${input.adset_id}`, token, { daily_budget: budgetCents });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Budget set: ${input.daily_budget}` } };
       }
 
       case "delete_adset": {
         const data = await metaDelete(`/${input.adset_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.adset_name}` } };
       }
 
@@ -1436,25 +1463,25 @@ async function executeTool(
           status: input.status ?? "PAUSED",
         };
         const data = await metaPost(`/act_${accountId}/ads`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "pause_ad": {
         const data = await metaPost(`/${input.ad_id}`, token, { status: "PAUSED" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Paused: ${input.ad_name}` } };
       }
 
       case "enable_ad": {
         const data = await metaPost(`/${input.ad_id}`, token, { status: "ACTIVE" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Enabled: ${input.ad_name}` } };
       }
 
       case "delete_ad": {
         const data = await metaDelete(`/${input.ad_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.ad_name}` } };
       }
 
@@ -1481,13 +1508,13 @@ async function executeTool(
             : JSON.stringify(input.degrees_of_freedom_spec);
         }
         const data = await metaPost(`/act_${accountId}/adcreatives`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "delete_adcreative": {
         const data = await metaDelete(`/${input.creative_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.creative_name}` } };
       }
 
@@ -1515,7 +1542,7 @@ async function executeTool(
         };
         if (input.description) body.description = input.description;
         const data = await metaPost(`/act_${accountId}/customaudiences`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
@@ -1529,13 +1556,13 @@ async function executeTool(
         if (input.retention_days)       body.retention_days         = String(input.retention_days);
         if (input.rule)                 body.rule                   = input.rule;
         const data = await metaPost(`/act_${accountId}/customaudiences`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "delete_customaudience": {
         const data = await metaDelete(`/${input.audience_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.audience_name}` } };
       }
 
@@ -1555,7 +1582,7 @@ async function executeTool(
           url: input.url,
         };
         const data = await metaPost(`/act_${accountId}/adimages`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
@@ -1563,7 +1590,7 @@ async function executeTool(
         const data = await metaPost(`/act_${accountId}/adimages`, token, {
           hash: input.image_hash,
         });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted image: ${input.image_hash}` } };
       }
 
@@ -1579,7 +1606,7 @@ async function executeTool(
 
       case "delete_advideo": {
         const data = await metaDelete(`/${input.video_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.video_title}` } };
       }
 
@@ -1595,7 +1622,7 @@ async function executeTool(
 
       case "create_adspixel": {
         const data = await metaPost(`/act_${accountId}/adspixels`, token, { name: input.name });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
@@ -1629,25 +1656,25 @@ async function executeTool(
           status: input.status ?? "ENABLED",
         };
         const data = await metaPost(`/act_${accountId}/adrules`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "enable_adrule": {
         const data = await metaPost(`/${input.rule_id}`, token, { status: "ENABLED" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Enabled rule: ${input.rule_name}` } };
       }
 
       case "disable_adrule": {
         const data = await metaPost(`/${input.rule_id}`, token, { status: "DISABLED" });
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Disabled rule: ${input.rule_name}` } };
       }
 
       case "delete_adrule": {
         const data = await metaDelete(`/${input.rule_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted rule: ${input.rule_name}` } };
       }
 
@@ -1670,13 +1697,13 @@ async function executeTool(
         if (input.rule)        body.rule        = input.rule;
         if (input.description) body.description = input.description;
         const data = await metaPost(`/act_${accountId}/customconversions`, token, body);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data };
       }
 
       case "delete_customconversion": {
         const data = await metaDelete(`/${input.conversion_id}`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted: ${input.conversion_name}` } };
       }
 
@@ -1702,7 +1729,7 @@ async function executeTool(
 
       case "delete_catalog_product": {
         const data = await metaDelete(`/${input.catalog_id}/batch`, token);
-        if (data.error) return { success: false, error: String(data.error.message ?? JSON.stringify(data.error)) };
+        if (data.error) return { success: false, error: buildMetaError(data.error) };
         return { success: true, data: { message: `Deleted product ${input.product_name}` } };
       }
 
@@ -1748,6 +1775,7 @@ async function executeTool(
           objective: tmpl.objective,
           status,
           special_ad_categories: tmpl.special_ad_categories,
+          buying_type: "AUCTION",
         };
         // CBO templates set budget at campaign level
         if (tmpl.id === "cbo_scaling") {
@@ -1756,9 +1784,20 @@ async function executeTool(
 
         const campaignData = await metaPost(`/act_${accountId}/campaigns`, token, campaignBody);
         if (!campaignData || campaignData.error) {
-          return { success: false, error: `Campaign creation failed: ${campaignData?.error?.message ?? JSON.stringify(campaignData?.error ?? campaignData)}` };
+          return { success: false, error: `Campaign creation failed: ${buildMetaError(campaignData?.error ?? campaignData)}` };
         }
         const campaignId: string = campaignData.id;
+
+        // Auto-fetch pixel for sales/leads objectives if not provided
+        let pixelId: string | undefined = input.pixel_id;
+        if (!pixelId && (tmpl.objective === "OUTCOME_SALES" || tmpl.objective === "OUTCOME_LEADS")) {
+          try {
+            const pixelData = await metaGet(`/act_${accountId}/adspixels`, token, { fields: "id,name", limit: "1" });
+            if (Array.isArray(pixelData.data) && pixelData.data[0]?.id) {
+              pixelId = String(pixelData.data[0].id);
+            }
+          } catch (_) {}
+        }
 
         // Step 2: Create ad sets
         const adsetIds: string[] = [];
@@ -1787,8 +1826,15 @@ async function executeTool(
             billing_event: tmpl.billing_event,
             optimization_goal: input.optimization_goal ?? tmpl.optimization_goal,
             targeting: JSON.stringify(targeting),
+            bid_strategy: "LOWEST_COST_WITHOUT_CAP",
           };
           if (adsetBudget) adsetBody.daily_budget = String(adsetBudget);
+          if (pixelId && (tmpl.objective === "OUTCOME_SALES" || tmpl.objective === "OUTCOME_LEADS")) {
+            adsetBody.promoted_object = JSON.stringify({
+              pixel_id: pixelId,
+              custom_event_type: tmpl.objective === "OUTCOME_LEADS" ? "LEAD" : "PURCHASE",
+            });
+          }
 
           // Manual placements
           if (tmpl.placement_type === "manual" && tmpl.manual_placements) {
@@ -1939,22 +1985,6 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     ? formatBrainContext(brain)
     : "No brain data — run a full account analysis to build memory.";
 
-  const modeInstruction = taskMode === "execute"
-    ? `MODE: EXECUTE — CRITICAL RULES:
-- NEVER write JSON in your response text
-- NEVER simulate or describe tool calls
-- ALWAYS call the actual tool directly
-- If user says نفذ after a plan: call execute_campaign_template immediately
-- If campaign creation fails: report the EXACT error from Meta API
-- Never say تم بنجاح unless you received a real campaign_id from Meta API
-- A real success always includes a numeric campaign_id like 12345678901234
-- Use execute_campaign_template for new campaigns. For edits, fetch the campaign/adset ID first, then act.`
-    : taskMode === "analyze"
-    ? "MODE: ANALYZE — Fetch data, identify patterns, save to brain. Be specific with numbers. No generic advice."
-    : taskMode === "plan"
-    ? "MODE: PLAN — Use brain data first. Only fetch if brain is absent. Return a structured plan with priorities."
-    : "MODE: CHAT — Answer from brain memory only. No tool calls needed.";
-
   const systemPrompt = `You are JOEX — an elite Meta Ads operator and strategic media buyer with full live access to the Meta Marketing API.
 
 ACCOUNT: ${accountName} | act_${accountId} | ${currency} | ${since} → ${until}
@@ -2023,7 +2053,8 @@ EXECUTION RULES:
 - Never create targeting specs without showing them first
 - After any execution → call save_account_brain
 - If a tool call fails → report the exact error
-- Never hallucinate data — if you don't have it, fetch it`;
+- Never hallucinate data — if you don't have it, fetch it
+- Paused campaigns with zero spend: NEVER classify as a loss or underperformer. State they have no spend data for this period and ask the user if they want to review or activate them before making any recommendation.`;
 
   // Select relevant tool subset for detected mode
   const allOAITools = accountId ? toOAITools(TOOLS) : [];
@@ -2062,7 +2093,7 @@ EXECUTION RULES:
     for (let iter = 0; iter < 5; iter++) {
       const aiResult = forcedProvider
         ? await callProvider(forcedProvider, currentMessages, selectedTools, systemPrompt)
-        : await callWithFallback(currentMessages, selectedTools, systemPrompt);
+        : await callWithFallback(currentMessages, selectedTools, systemPrompt, taskMode);
 
       lastProvider = aiResult.provider;
       lastModel    = aiResult.model;

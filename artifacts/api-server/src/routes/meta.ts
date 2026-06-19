@@ -319,7 +319,7 @@ router.get("/meta/instagram", async (req, res): Promise<void> => {
       fields: [
         "instagram_business_account{",
         "id,name,biography,followers_count,media_count,profile_picture_url,username,website,",
-        "insights.metric(follower_count,impressions,reach,profile_views).period(day)",
+        "insights.metric(impressions,reach,profile_views).period(day)",
         "}",
       ].join(""),
     });

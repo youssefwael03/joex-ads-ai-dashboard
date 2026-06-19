@@ -1,0 +1,6 @@
+- [Provider chain & analyze mode](provider-chain-analyze.md) — Groq hallucinates without real tool data; analyze mode must skip it via ANALYZE_CHAIN.
+- [Claude removal](claude-removal.md) — Claude was never in ProviderName type but was in CHAIN/MODELS/LIMITS/callProvider; caused "Anthropic is not defined" errors at runtime.
+- [Campaign creation required fields](campaign-creation-fields.md) — Meta API requires buying_type, bid_strategy, promoted_object (pixel+event) or adset creation fails silently.
+- [Instagram follower_count period bug](instagram-insights-period.md) — follower_count metric requires period=lifetime, not period=day; causes empty insights; use impressions/reach/profile_views for day period.
+- [PDF Arabic font fix](pdf-arabic-font.md) — Amiri font must be SET (doc.setFont) after loading, not just registered; use Array.from().join() not string-concat loop for btoa performance.
+- [Port 8080 duplicate workflow](port-conflict.md) — "API Server" workflow conflicts with "artifacts/api-server: API Server"; only the latter should run; never restart "API Server".

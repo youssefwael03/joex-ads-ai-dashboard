@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
-import { Instagram as InstagramIcon, Users, Eye, Heart, AlertCircle } from "lucide-react";
+import { Instagram as InstagramIcon, Users, Eye, Heart, AlertCircle, CheckCircle2, XCircle, Loader } from "lucide-react";
 
 function MetricCard({ label, value, icon: Icon, color }: { label: string; value: string; icon: typeof Users; color: string }) {
   return (
@@ -59,6 +59,21 @@ export default function Instagram() {
         <p className="text-muted-foreground mt-1 text-sm">
           Profile analytics from your linked Instagram Business Account.
         </p>
+      </div>
+
+      {/* Connection status bar */}
+      <div className="flex items-center gap-3 text-sm">
+        {pagesLoading ? (
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Loader className="h-4 w-4 animate-spin" /> Loading pages...</span>
+        ) : pages.length > 0 && !selectedPageId ? (
+          <span className="flex items-center gap-1.5 text-amber-400"><AlertCircle className="h-4 w-4" /> Select a Facebook page to load Instagram data</span>
+        ) : selectedPageId && igLoading ? (
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Loader className="h-4 w-4 animate-spin" /> Fetching Instagram account...</span>
+        ) : selectedPageId && igAccount ? (
+          <span className="flex items-center gap-1.5 text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Connected — @{igAccount.username}</span>
+        ) : selectedPageId && !igAccount ? (
+          <span className="flex items-center gap-1.5 text-red-400"><XCircle className="h-4 w-4" /> No Instagram Business Account linked to this page</span>
+        ) : null}
       </div>
 
       {/* Page Selector */}

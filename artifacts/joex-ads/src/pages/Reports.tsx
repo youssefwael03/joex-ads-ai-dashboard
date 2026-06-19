@@ -235,18 +235,25 @@ export default function Reports() {
       const contentW = pageW - margin * 2;
 
       // ── Arabic font (Amiri) ────────────────────────────────────────────
+      let amiriLoaded = false;
       try {
         const fontRes = await fetch("/fonts/Amiri-Regular.ttf");
         if (fontRes.ok) {
           const fontBuf = await fontRes.arrayBuffer();
-          const bytes   = new Uint8Array(fontBuf);
-          let binary    = "";
-          for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-          const fontB64 = btoa(binary);
+          const fontB64 = btoa(
+            Array.from(new Uint8Array(fontBuf), (b) => String.fromCharCode(b)).join("")
+          );
           doc.addFileToVFS("Amiri-Regular.ttf", fontB64);
           doc.addFont("Amiri-Regular.ttf", "Amiri", "normal");
+          amiriLoaded = true;
         }
       } catch (_) {}
+
+      const hasArabic = (text: string) =>
+        /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
+
+      const setLatinFont  = (bold = false) => doc.setFont("helvetica", bold ? "bold" : "normal");
+      const setArabicFont = ()             => { if (amiriLoaded) doc.setFont("Amiri", "normal"); };
 
       // ── Section header helper ─────────────────────────────────────────
       const sectionHeader = (text: string, yPos: number): number => {
@@ -278,11 +285,12 @@ export default function Reports() {
       doc.setLineWidth(0.4);
       doc.line(30, 130, pageW - 30, 130);
       doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
       doc.setTextColor(230, 230, 245);
-      doc.text(selectedAccountName || selectedAccountId || "—", pageW / 2, 144, { align: "center" });
+      const acctLabel = selectedAccountName || selectedAccountId || "—";
+      if (hasArabic(acctLabel)) { setArabicFont(); } else { setLatinFont(true); }
+      doc.text(acctLabel, pageW / 2, 144, { align: "center" });
+      setLatinFont(false);
       doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
       doc.setTextColor(130, 130, 150);
       doc.text(`Period: ${since}  →  ${until}`, pageW / 2, 157, { align: "center" });
       doc.text(`Currency: ${currency}`, pageW / 2, 165, { align: "center" });
@@ -374,7 +382,7 @@ export default function Reports() {
       const zeroSpendCount     = allCampaigns.length - spendCampaigns.length;
 
       if (spendCampaigns.length > 0) {
-        if (y > 220) { doc.addPage(); y = 20; }
+        doc.addPage(); y = 20;
         y = sectionHeader(`Campaigns — Active Spend (${spendCampaigns.length})`, y);
 
         autoTable(doc, {
