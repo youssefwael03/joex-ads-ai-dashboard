@@ -24,6 +24,7 @@ import html2canvas from "html2canvas";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Cell, PieChart, Pie,
+  LineChart, Line, FunnelChart, Funnel, LabelList,
 } from "recharts";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -193,67 +194,165 @@ export default function Reports() {
   const GENDER_COLORS = ["#6366f1", "#ec4899", "#a78bfa"];
   const roasColor = (r: number) => r >= 6 ? "#22c55e" : r >= 4 ? "#eab308" : "#ef4444";
 
+  // ── Additional chart data ────────────────────────────────────────────────
+  const viewContent  = getAction(ins?.actions, "view_content");
+  const addToCart    = getAction(ins?.actions, "add_to_cart");
+  const initCheckout = getAction(ins?.actions, "initiate_checkout");
+
+  const funnelChartData = [
+    { name: "View Content", value: viewContent,  fill: "#6366f1" },
+    { name: "Add to Cart",  value: addToCart,    fill: "#8b5cf6" },
+    { name: "Checkout",     value: initCheckout, fill: "#D4AF37" },
+    { name: "Purchase",     value: purchases,    fill: "#22c55e" },
+  ].filter((d) => d.value > 0);
+
+  const top5RevenueData = activeCampaigns
+    .map((c: any) => {
+      const ci = c.insights?.data?.[0] ?? {};
+      const s  = safeNum(ci.spend);
+      const r  = getPurchaseRoas(ci.purchase_roas);
+      if (s <= 0) return null;
+      return {
+        name:    c.name?.length > 22 ? c.name.slice(0, 22) + "…" : c.name,
+        Spend:   parseFloat(s.toFixed(2)),
+        Revenue: parseFloat((s * r).toFixed(2)),
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => b.Spend - a.Spend)
+    .slice(0, 5) as any[];
+
+  const roasTrendData = dailyChartData.slice(-30);
+
   // ── PDF export ────────────────────────────────────────────────────────────
 
   const generatePdf = async () => {
     setGenerating(true);
     try {
-      const doc    = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageW  = doc.internal.pageSize.getWidth();
-      const margin = 14;
+      const doc      = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW    = doc.internal.pageSize.getWidth();
+      const margin   = 14;
       const contentW = pageW - margin * 2;
 
-      doc.setFillColor(12, 12, 18);
-      doc.rect(0, 0, pageW, 34, "F");
+      // ── Arabic font (Amiri) ────────────────────────────────────────────
+      try {
+        const fontRes = await fetch("/fonts/Amiri-Regular.ttf");
+        if (fontRes.ok) {
+          const fontBuf = await fontRes.arrayBuffer();
+          const bytes   = new Uint8Array(fontBuf);
+          let binary    = "";
+          for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+          const fontB64 = btoa(binary);
+          doc.addFileToVFS("Amiri-Regular.ttf", fontB64);
+          doc.addFont("Amiri-Regular.ttf", "Amiri", "normal");
+        }
+      } catch (_) {}
+
+      // ── Section header helper ─────────────────────────────────────────
+      const sectionHeader = (text: string, yPos: number): number => {
+        doc.setFillColor(10, 15, 30);
+        doc.rect(margin, yPos, contentW, 9, "F");
+        doc.setFillColor(212, 175, 55);
+        doc.rect(margin, yPos, 3, 9, "F");
+        doc.setTextColor(212, 175, 55);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text(text, margin + 7, yPos + 6);
+        return yPos + 13;
+      };
+
+      // ── Cover page ────────────────────────────────────────────────────
+      doc.setFillColor(10, 15, 30);
+      doc.rect(0, 0, pageW, 297, "F");
       doc.setFillColor(212, 175, 55);
-      doc.rect(0, 0, 4, 34, "F");
+      doc.rect(0, 0, 8, 297, "F");
       doc.setTextColor(212, 175, 55);
-      doc.setFontSize(22);
+      doc.setFontSize(48);
       doc.setFont("helvetica", "bold");
-      doc.text("JOEX ADS", margin + 2, 14);
-      doc.setTextColor(200, 200, 210);
+      doc.text("JOEX", pageW / 2, 110, { align: "center" });
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(200, 200, 220);
+      doc.text("Performance Marketing Report", pageW / 2, 122, { align: "center" });
+      doc.setDrawColor(212, 175, 55);
+      doc.setLineWidth(0.4);
+      doc.line(30, 130, pageW - 30, 130);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(230, 230, 245);
+      doc.text(selectedAccountName || selectedAccountId || "—", pageW / 2, 144, { align: "center" });
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text("Performance Marketing Report", margin + 2, 21);
       doc.setTextColor(130, 130, 150);
+      doc.text(`Period: ${since}  →  ${until}`, pageW / 2, 157, { align: "center" });
+      doc.text(`Currency: ${currency}`, pageW / 2, 165, { align: "center" });
+      doc.text(`Generated: ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`, pageW / 2, 173, { align: "center" });
       doc.setFontSize(8);
-      doc.text(`Account: ${selectedAccountName || selectedAccountId}`, margin + 2, 28);
-      const rightX = pageW - margin;
-      doc.text(`Period: ${since} -> ${until}`, rightX, 14, { align: "right" });
-      doc.text(`Currency: ${currency}`, rightX, 20, { align: "right" });
-      doc.text(`Generated: ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`, rightX, 26, { align: "right" });
+      doc.setTextColor(60, 60, 80);
+      doc.text("Generated by JOEX Dashboard", pageW / 2, 265, { align: "center" });
 
-      let y = 44;
+      // ── Content pages ─────────────────────────────────────────────────
+      doc.addPage();
 
+      doc.setFillColor(12, 12, 18);
+      doc.rect(0, 0, pageW, 30, "F");
+      doc.setFillColor(212, 175, 55);
+      doc.rect(0, 0, 4, 30, "F");
       doc.setTextColor(212, 175, 55);
-      doc.setFontSize(11);
+      doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
-      doc.text("Account KPIs", margin, y);
-      y += 4;
+      doc.text("JOEX ADS", margin + 2, 12);
+      doc.setTextColor(200, 200, 210);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text("Performance Marketing Report", margin + 2, 19);
+      doc.setTextColor(130, 130, 150);
+      doc.setFontSize(7);
+      doc.text(`${selectedAccountName || selectedAccountId}  ·  ${since} → ${until}  ·  ${currency}`, margin + 2, 26);
 
-      autoTable(doc, {
-        startY: y,
-        body: [
-          ["Total Spend", formatCurr(spend), "Revenue", formatCurr(revenue), "ROAS", `${roas.toFixed(2)}x`],
-          ["CTR", `${ctr.toFixed(2)}%`, "CPM", formatCurr(cpm), "CPC", formatCurr(cpc)],
-          ["CPA", cpa > 0 ? formatCurr(cpa) : "—", "Purchases", fmtNumber(purchases), "Leads", fmtNumber(leads)],
-          ["Reach", fmtNumber(reach), "Impressions", fmtNumber(impressions), "Frequency", freq.toFixed(2)],
-          ["Active Campaigns", String(activeCampaigns.length), "Paused Campaigns", String(pausedCampaigns.length), "Total Campaigns", String(allCampaigns.length)],
-        ],
-        theme: "grid",
-        styles: { fontSize: 8.5, cellPadding: 3, textColor: [220, 220, 225], fillColor: [20, 20, 28] },
-        columnStyles: {
-          0: { fontStyle: "bold", textColor: [160, 160, 180], cellWidth: 28 },
-          1: { fontStyle: "bold", textColor: [245, 245, 250], cellWidth: 22 },
-          2: { fontStyle: "bold", textColor: [160, 160, 180], cellWidth: 28 },
-          3: { fontStyle: "bold", textColor: [245, 245, 250], cellWidth: 22 },
-          4: { fontStyle: "bold", textColor: [160, 160, 180], cellWidth: 28 },
-          5: { fontStyle: "bold", textColor: [245, 245, 250], cellWidth: 22 },
-        },
-        alternateRowStyles: { fillColor: [26, 26, 36] },
-        margin: { left: margin, right: margin },
+      let y = 38;
+
+      // ── 4-column KPI grid ─────────────────────────────────────────────
+      y = sectionHeader("Account KPIs", y);
+      const kpiItems = [
+        { label: "Total Spend",   value: formatCurr(spend)             },
+        { label: "Revenue",       value: formatCurr(revenue)           },
+        { label: "ROAS",          value: `${roas.toFixed(2)}x`         },
+        { label: "Purchases",     value: fmtNumber(purchases)          },
+        { label: "CTR",           value: `${ctr.toFixed(2)}%`          },
+        { label: "CPM",           value: formatCurr(cpm)               },
+        { label: "CPC",           value: formatCurr(cpc)               },
+        { label: "CPA",           value: cpa > 0 ? formatCurr(cpa) : "—" },
+        { label: "Frequency",     value: freq.toFixed(2)               },
+        { label: "Reach",         value: fmtNumber(reach)              },
+        { label: "Impressions",   value: fmtNumber(impressions)        },
+        { label: "Leads",         value: fmtNumber(leads)              },
+        { label: "Active",        value: String(activeCampaigns.length) + " campaigns" },
+        { label: "Paused",        value: String(pausedCampaigns.length) + " campaigns" },
+        { label: "Total",         value: String(allCampaigns.length) + " campaigns"   },
+        { label: "Active AdSets", value: String(adsets.length)         },
+      ];
+      const cols     = 4;
+      const kpiColW  = contentW / cols;
+      const kpiCardH = 16;
+      const kpiGap   = 2;
+      kpiItems.forEach((kpi, i) => {
+        const col  = i % cols;
+        const row  = Math.floor(i / cols);
+        const x    = margin + col * kpiColW;
+        const yy   = y + row * (kpiCardH + kpiGap);
+        doc.setFillColor(20, 20, 28);
+        doc.rect(x, yy, kpiColW - kpiGap, kpiCardH, "F");
+        doc.setTextColor(120, 120, 140);
+        doc.setFontSize(6.5);
+        doc.setFont("helvetica", "normal");
+        doc.text(kpi.label.toUpperCase(), x + 3, yy + 5.5);
+        doc.setTextColor(240, 240, 250);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.text(kpi.value, x + 3, yy + 12.5);
       });
-      y = (doc as any).lastAutoTable.finalY + 10;
+      y += Math.ceil(kpiItems.length / cols) * (kpiCardH + kpiGap) + 8;
 
       if (chartsRef.current) {
         try {
@@ -271,18 +370,17 @@ export default function Reports() {
         } catch (_) {}
       }
 
-      if (allCampaigns.length > 0) {
+      const spendCampaigns     = allCampaigns.filter((c: any) => safeNum(c.insights?.data?.[0]?.spend) > 0);
+      const zeroSpendCount     = allCampaigns.length - spendCampaigns.length;
+
+      if (spendCampaigns.length > 0) {
         if (y > 220) { doc.addPage(); y = 20; }
-        doc.setTextColor(212, 175, 55);
-        doc.setFontSize(11);
-        doc.setFont("helvetica", "bold");
-        doc.text(`Campaigns (${allCampaigns.length})`, margin, y);
-        y += 4;
+        y = sectionHeader(`Campaigns — Active Spend (${spendCampaigns.length})`, y);
 
         autoTable(doc, {
           startY: y,
           head: [["Campaign", "Status", "Spend", "ROAS", "CTR", "CPM", "Purchases", "Daily Budget"]],
-          body: allCampaigns
+          body: spendCampaigns
             .map((c: any) => {
               const d  = c.insights?.data?.[0] ?? {};
               const r  = getPurchaseRoas(d.purchase_roas);
@@ -314,7 +412,15 @@ export default function Reports() {
             }
           },
         });
-        y = (doc as any).lastAutoTable.finalY + 10;
+        y = (doc as any).lastAutoTable.finalY + 4;
+
+        if (zeroSpendCount > 0) {
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "italic");
+          doc.setTextColor(100, 100, 120);
+          doc.text(`${zeroSpendCount} additional paused campaign${zeroSpendCount !== 1 ? "s" : ""} with $0 spend not shown.`, margin, y);
+          y += 8;
+        }
       }
 
       const pageCount = (doc.internal as any).getNumberOfPages();
@@ -512,7 +618,92 @@ export default function Reports() {
           </div>
         )}
 
-        {/* Row 2: Gender donut + Age bar + Day-of-week bar */}
+        {/* Row 2b: ROAS Trend + Spend vs Revenue + Purchases Funnel */}
+        {!isLoading && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+            <Card className="bg-card/40 border-card-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  ROAS Trend (30 days)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {roasTrendData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={roasTrendData} margin={{ left: 0, right: 10, top: 4, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#666" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 9, fill: "#999" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}x`} />
+                      <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}x`, "ROAS"]} />
+                      <Line type="monotone" dataKey="ROAS" stroke="#D4AF37" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">No ROAS data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/40 border-card-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-primary" />
+                  Spend vs Revenue — Top 5
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {top5RevenueData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={top5RevenueData} layout="vertical" margin={{ left: 0, right: 10, top: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 9, fill: "#666" }} axisLine={false} tickLine={false} tickFormatter={(v) => fmtNumber(v)} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 9, fill: "#aaa" }} axisLine={false} tickLine={false} width={90} />
+                      <Tooltip content={<ChartTooltip currency={currency} />} />
+                      <Bar dataKey="Spend"   fill="#D4AF37" radius={[0, 3, 3, 0]} maxBarSize={10} />
+                      <Bar dataKey="Revenue" fill="#6366f1" radius={[0, 3, 3, 0]} maxBarSize={10} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">No active campaign spend</div>
+                )}
+                <div className="flex gap-4 mt-1 justify-center text-[10px] text-muted-foreground">
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-[#D4AF37] inline-block" />Spend</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-indigo-500 inline-block" />Revenue</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/40 border-card-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4 text-primary" />
+                  Purchase Funnel
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {funnelChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <FunnelChart>
+                      <Tooltip formatter={(v: any) => fmtNumber(v)} />
+                      <Funnel dataKey="value" data={funnelChartData} isAnimationActive={false}>
+                        <LabelList position="right" fill="#aaa" stroke="none" dataKey="name" style={{ fontSize: 9 }} />
+                      </Funnel>
+                    </FunnelChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center px-4">
+                    No funnel data — requires pixel events (ViewContent, AddToCart, InitiateCheckout, Purchase)
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+          </div>
+        )}
+
+        {/* Row 3: Gender donut + Age bar + Day-of-week bar */}
         {!isLoading && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
