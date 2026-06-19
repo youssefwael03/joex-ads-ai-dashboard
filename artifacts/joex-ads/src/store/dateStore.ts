@@ -14,6 +14,6 @@ const thirtyDaysAgo = subDays(today, 30);
 export const useDateStore = create<DateStore>((set) => ({
   since: format(thirtyDaysAgo, "yyyy-MM-dd"),
   until: format(today, "yyyy-MM-dd"),
-  preset: "Last 30 days",
+  preset: "Last 30 Days",
   setDateRange: (since, until, preset) => set({ since, until, preset }),
 }));

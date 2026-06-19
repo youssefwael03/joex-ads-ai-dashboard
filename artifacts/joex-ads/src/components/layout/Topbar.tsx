@@ -15,7 +15,8 @@ import {
   startOfMonth,
   endOfMonth,
   subMonths,
-  startOfYear,
+  startOfWeek,
+  endOfWeek,
 } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
@@ -32,14 +33,39 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
     until: () => format(subDays(new Date(), 1), "yyyy-MM-dd"),
   },
   {
+    label: "Today & Yesterday",
+    since: () => format(subDays(new Date(), 1), "yyyy-MM-dd"),
+    until: () => format(new Date(), "yyyy-MM-dd"),
+  },
+  {
     label: "Last 7 Days",
     since: () => format(subDays(new Date(), 6), "yyyy-MM-dd"),
+    until: () => format(new Date(), "yyyy-MM-dd"),
+  },
+  {
+    label: "Last 14 Days",
+    since: () => format(subDays(new Date(), 13), "yyyy-MM-dd"),
+    until: () => format(new Date(), "yyyy-MM-dd"),
+  },
+  {
+    label: "Last 28 Days",
+    since: () => format(subDays(new Date(), 27), "yyyy-MM-dd"),
     until: () => format(new Date(), "yyyy-MM-dd"),
   },
   {
     label: "Last 30 Days",
     since: () => format(subDays(new Date(), 29), "yyyy-MM-dd"),
     until: () => format(new Date(), "yyyy-MM-dd"),
+  },
+  {
+    label: "This Week",
+    since: () => format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd"),
+    until: () => format(new Date(), "yyyy-MM-dd"),
+  },
+  {
+    label: "Last Week",
+    since: () => format(startOfWeek(subDays(new Date(), 7), { weekStartsOn: 1 }), "yyyy-MM-dd"),
+    until: () => format(endOfWeek(subDays(new Date(), 7), { weekStartsOn: 1 }), "yyyy-MM-dd"),
   },
   {
     label: "This Month",
@@ -53,7 +79,7 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
   },
   {
     label: "Maximum",
-    since: () => format(startOfYear(subMonths(new Date(), 24)), "yyyy-MM-dd"),
+    since: () => "2020-01-01",
     until: () => format(new Date(), "yyyy-MM-dd"),
   },
 ];
@@ -88,6 +114,10 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
   }, [accountsData, selectedAccountId, selectAccount, setAccounts]);
 
   const handlePreset = (label: string) => {
+    if (label === "Custom") {
+      setCalOpen(true);
+      return;
+    }
     const p = PRESETS.find((x) => x.label === label);
     if (!p) return;
     setDateRange(p.since(), p.until(), label);
@@ -101,6 +131,8 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
       setCalOpen(false);
     }
   };
+
+  const allSelectItems = [...PRESETS.map((p) => p.label), "Custom"];
 
   return (
     <div className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-20">
@@ -136,42 +168,26 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
             </SelectContent>
           </Select>
 
-          {/* Date preset */}
-          <Select value={preset} onValueChange={handlePreset}>
-            <SelectTrigger
-              className="w-[120px] lg:w-[150px] bg-background border-border text-sm"
-              data-testid="select-date-preset"
-            >
-              <SelectValue placeholder="Date range" />
-            </SelectTrigger>
-            <SelectContent>
-              {PRESETS.map((p) => (
-                <SelectItem key={p.label} value={p.label}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Custom calendar — hidden on tablet, shown on md+ */}
+          {/* Date preset selector — all 13 options */}
           <Popover open={calOpen} onOpenChange={setCalOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className={cn(
-                  "border-border bg-background font-normal gap-2 hidden md:flex",
-                  preset === "Custom" && "border-primary/60 text-primary"
-                )}
-                data-testid="btn-custom-date"
+            <Select value={preset} onValueChange={handlePreset}>
+              <SelectTrigger
+                className="w-[150px] lg:w-[185px] bg-background border-border text-sm"
+                data-testid="select-date-preset"
               >
-                <CalendarIcon className="h-3.5 w-3.5" />
-                <span className="hidden lg:inline">
-                  {preset === "Custom" ? `${since} → ${until}` : "Custom"}
-                </span>
-                <span className="lg:hidden">Custom</span>
-              </Button>
-            </PopoverTrigger>
+                <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground mr-1 flex-shrink-0" />
+                <SelectValue placeholder="Date range" />
+              </SelectTrigger>
+              <SelectContent>
+                {allSelectItems.map((label) => (
+                  <SelectItem key={label} value={label}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Calendar popover — triggered when Custom is selected */}
             <PopoverContent className="w-auto p-0 bg-card border-border" align="start">
               <Calendar
                 mode="range"
@@ -256,33 +272,21 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
           </SelectContent>
         </Select>
 
-        <Select value={preset} onValueChange={handlePreset}>
-          <SelectTrigger className="w-[110px] bg-background border-border text-xs h-9">
-            <SelectValue placeholder="Range" />
-          </SelectTrigger>
-          <SelectContent>
-            {PRESETS.map((p) => (
-              <SelectItem key={p.label} value={p.label}>
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {/* Mobile calendar trigger */}
+        {/* Mobile date selector */}
         <Popover open={calOpen} onOpenChange={setCalOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                "h-9 w-9 p-0 border-border bg-background flex-shrink-0",
-                preset === "Custom" && "border-primary/60 text-primary"
-              )}
-            >
-              <CalendarIcon className="h-3.5 w-3.5" />
-            </Button>
-          </PopoverTrigger>
+          <Select value={preset} onValueChange={handlePreset}>
+            <SelectTrigger className="w-[130px] bg-background border-border text-xs h-9">
+              <SelectValue placeholder="Range" />
+            </SelectTrigger>
+            <SelectContent>
+              {allSelectItems.map((label) => (
+                <SelectItem key={label} value={label}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <PopoverContent className="w-auto p-0 bg-card border-border" align="end">
             <Calendar
               mode="range"

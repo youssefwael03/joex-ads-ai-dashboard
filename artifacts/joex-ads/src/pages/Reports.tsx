@@ -1,5 +1,6 @@
-import { useState, useRef, useMemo } from "react";
+import { useRef, useMemo } from "react";
 import { useAccountStore } from "@/store/accountStore";
+import { useDateStore } from "@/store/dateStore";
 import {
   useInsights, useCampaigns, useAdSets, useInsightsDaily,
   useInsightsBreakdown, useAccountInfo,
@@ -9,11 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   FileText, Download, Loader2, LayoutDashboard, TrendingUp,
-  DollarSign, ShoppingCart, TrendingDown, RefreshCw, ChevronDown,
+  DollarSign, ShoppingCart, TrendingDown,
 } from "lucide-react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { safeNum, fmtNumber, getPurchaseRoas, getAction, fmtCurrency } from "@/lib/metaApi";
 // @ts-ignore
@@ -22,77 +23,12 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, Cell, PieChart, Pie, Legend,
+  AreaChart, Area, Cell, PieChart, Pie,
 } from "recharts";
 
-// ── Date presets ──────────────────────────────────────────────────────────────
+// ── Date helpers ──────────────────────────────────────────────────────────────
 
-const DATE_PRESETS = [
-  { label: "اليوم",               value: "today"           },
-  { label: "أمس",                 value: "yesterday"       },
-  { label: "اليوم وأمس",          value: "today_yesterday" },
-  { label: "آخر 7 أيام",         value: "last_7"          },
-  { label: "آخر 14 يوم",         value: "last_14"         },
-  { label: "آخر 28 يوم",         value: "last_28"         },
-  { label: "آخر 30 يوم",         value: "last_30"         },
-  { label: "هذا الأسبوع",         value: "this_week"       },
-  { label: "الأسبوع الماضي",      value: "last_week"       },
-  { label: "هذا الشهر",           value: "this_month"      },
-  { label: "الشهر الماضي",        value: "last_month"      },
-  { label: "الحد الأقصى",         value: "maximum"         },
-  { label: "مخصص",                value: "custom"          },
-];
-
-function fmt(d: Date): string { return d.toISOString().split("T")[0]; }
-
-function daysAgo(n: number): Date { const d = new Date(); d.setDate(d.getDate() - n); return d; }
-
-function getDateRange(preset: string, customFrom: string, customTo: string): { since: string; until: string } {
-  const today = new Date();
-  switch (preset) {
-    case "today":
-      return { since: fmt(today), until: fmt(today) };
-    case "yesterday":
-      return { since: fmt(daysAgo(1)), until: fmt(daysAgo(1)) };
-    case "today_yesterday":
-      return { since: fmt(daysAgo(1)), until: fmt(today) };
-    case "last_7":
-      return { since: fmt(daysAgo(7)), until: fmt(today) };
-    case "last_14":
-      return { since: fmt(daysAgo(14)), until: fmt(today) };
-    case "last_28":
-      return { since: fmt(daysAgo(28)), until: fmt(today) };
-    case "last_30":
-      return { since: fmt(daysAgo(30)), until: fmt(today) };
-    case "this_week": {
-      const dow = today.getDay(); // 0=Sun
-      const monday = new Date(today); monday.setDate(today.getDate() - ((dow + 6) % 7));
-      return { since: fmt(monday), until: fmt(today) };
-    }
-    case "last_week": {
-      const dow = today.getDay();
-      const lastMon = new Date(today); lastMon.setDate(today.getDate() - ((dow + 6) % 7) - 7);
-      const lastSun = new Date(lastMon); lastSun.setDate(lastMon.getDate() + 6);
-      return { since: fmt(lastMon), until: fmt(lastSun) };
-    }
-    case "this_month":
-      return { since: fmt(new Date(today.getFullYear(), today.getMonth(), 1)), until: fmt(today) };
-    case "last_month": {
-      const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      const lastOfLastMonth  = new Date(today.getFullYear(), today.getMonth(), 0);
-      return { since: fmt(firstOfLastMonth), until: fmt(lastOfLastMonth) };
-    }
-    case "maximum":
-      return { since: "2020-01-01", until: fmt(today) };
-    case "custom": {
-      const s = customFrom && customFrom.length === 10 ? customFrom : fmt(daysAgo(30));
-      const u = customTo   && customTo.length   === 10 ? customTo   : fmt(today);
-      return { since: s, until: u };
-    }
-    default:
-      return { since: fmt(daysAgo(30)), until: fmt(today) };
-  }
-}
+function fmtDate(d: Date): string { return d.toISOString().split("T")[0]; }
 
 function getPrevPeriod(since: string, until: string): { since: string; until: string } {
   const s = new Date(since);
@@ -100,12 +36,12 @@ function getPrevPeriod(since: string, until: string): { since: string; until: st
   const diff = Math.round((u.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
   const prevUntil = new Date(s); prevUntil.setDate(s.getDate() - 1);
   const prevSince = new Date(prevUntil); prevSince.setDate(prevUntil.getDate() - diff + 1);
-  return { since: fmt(prevSince), until: fmt(prevUntil) };
+  return { since: fmtDate(prevSince), until: fmtDate(prevUntil) };
 }
 
 // ── Chart tooltip ─────────────────────────────────────────────────────────────
 
-function ChartTooltip({ active, payload, label, currency, isRoas, isPct }: any) {
+function ChartTooltip({ active, payload, label, currency, isRoas }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-[#1a1a2e] border border-white/10 rounded-lg px-3 py-2 text-xs shadow-xl">
@@ -115,9 +51,7 @@ function ChartTooltip({ active, payload, label, currency, isRoas, isPct }: any) 
           <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
           <span className="text-white/60">{p.name}:</span>
           <span className="font-mono font-semibold text-white">
-            {isRoas ? `${Number(p.value).toFixed(2)}x`
-              : isPct ? `${Number(p.value).toFixed(2)}%`
-              : fmtCurrency(p.value, currency)}
+            {isRoas ? `${Number(p.value).toFixed(2)}x` : fmtCurrency(p.value, currency)}
           </span>
         </div>
       ))}
@@ -132,14 +66,14 @@ function NoAccountState() {
         <LayoutDashboard className="h-10 w-10 text-primary" />
       </div>
       <div>
-        <h3 className="text-xl font-semibold mb-2">اختر حساب إعلاني</h3>
-        <p className="text-muted-foreground text-sm max-w-xs">اختر حسابًا لعرض التقارير.</p>
+        <h3 className="text-xl font-semibold mb-2">Select an Ad Account</h3>
+        <p className="text-muted-foreground text-sm max-w-xs">Choose an account to generate reports.</p>
       </div>
     </div>
   );
 }
 
-// ── KPI delta helper ──────────────────────────────────────────────────────────
+// ── KPI delta badge ───────────────────────────────────────────────────────────
 
 function Delta({ curr, prev, higherIsBetter = true }: { curr: number; prev: number; higherIsBetter?: boolean }) {
   if (!prev || prev === 0) return null;
@@ -157,147 +91,118 @@ function Delta({ curr, prev, higherIsBetter = true }: { curr: number; prev: numb
 
 export default function Reports() {
   const { selectedAccountId, selectedAccountName } = useAccountStore();
+  const { since, until } = useDateStore();
   const formatCurr = useFormatCurrency();
   const currency = useAccountCurrency();
-
-  // ── Local date state ──────────────────────────────────────────────────────
-  const [preset, setPreset]         = useState("last_30");
-  const [customFrom, setCustomFrom] = useState(() => fmt(daysAgo(30)));
-  const [customTo, setCustomTo]     = useState(() => fmt(new Date()));
-  const [presetOpen, setPresetOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-
-  const { since, until } = useMemo(
-    () => getDateRange(preset, customFrom, customTo),
-    [preset, customFrom, customTo],
-  );
-  const { since: prevSince, until: prevUntil } = useMemo(() => getPrevPeriod(since, until), [since, until]);
-
-  const presetLabel = DATE_PRESETS.find((p) => p.value === preset)?.label ?? "آخر 30 يوم";
-
-  // ── API hooks ─────────────────────────────────────────────────────────────
-  const { data: insightsData,     isLoading: insightsLoading }  = useInsights(selectedAccountId, since, until);
-  const { data: prevInsightsData                              }  = useInsights(selectedAccountId, prevSince, prevUntil);
-  const { data: campaignsData,    isLoading: campaignsLoading }  = useCampaigns(selectedAccountId, since, until);
-  const { data: adsetsData,       isLoading: adsetsLoading    }  = useAdSets(selectedAccountId, since, until);
-  const { data: dailyData,        isLoading: dailyLoading     }  = useInsightsDaily(selectedAccountId, since, until);
-  const { data: genderData                                    }  = useInsightsBreakdown(selectedAccountId, "gender", since, until);
-  const { data: ageData                                       }  = useInsightsBreakdown(selectedAccountId, "age", since, until);
-  const { data: accountInfoData                               }  = useAccountInfo(selectedAccountId);
-
   const chartsRef = useRef<HTMLDivElement>(null);
+
+  // Previous period for delta comparison
+  const { since: prevSince, until: prevUntil } = useMemo(
+    () => getPrevPeriod(since, until),
+    [since, until],
+  );
+
+  // ── Data hooks ────────────────────────────────────────────────────────────
+  const { data: insightsData,  isLoading: insightsLoading  } = useInsights(selectedAccountId, since, until);
+  const { data: prevInsData                                 } = useInsights(selectedAccountId, prevSince, prevUntil);
+  const { data: campaignsData, isLoading: campaignsLoading } = useCampaigns(selectedAccountId, since, until);
+  const { data: adsetsData,    isLoading: adsetsLoading    } = useAdSets(selectedAccountId, since, until);
+  const { data: dailyData,     isLoading: dailyLoading     } = useInsightsDaily(selectedAccountId, since, until);
+  const { data: genderData                                  } = useInsightsBreakdown(selectedAccountId, "gender", since, until);
+  const { data: ageData                                     } = useInsightsBreakdown(selectedAccountId, "age", since, until);
+  useAccountInfo(selectedAccountId);
 
   if (!selectedAccountId) return <NoAccountState />;
 
   const isLoading = insightsLoading || campaignsLoading || adsetsLoading || dailyLoading;
 
-  // ── Current period KPIs ───────────────────────────────────────────────────
-  const ins     = insightsData?.data?.[0];
-  const spend   = safeNum(ins?.spend);
-  const roas    = getPurchaseRoas(ins?.purchase_roas);
-  const ctr     = safeNum(ins?.ctr);
-  const cpc     = safeNum(ins?.cpc);
-  const cpm     = safeNum(ins?.cpm);
-  const freq    = safeNum(ins?.frequency);
+  // ── Current period metrics ────────────────────────────────────────────────
+  const ins       = insightsData?.data?.[0];
+  const spend     = safeNum(ins?.spend);
+  const roas      = getPurchaseRoas(ins?.purchase_roas);
+  const ctr       = safeNum(ins?.ctr);
+  const cpc       = safeNum(ins?.cpc);
+  const cpm       = safeNum(ins?.cpm);
+  const freq      = safeNum(ins?.frequency);
   const impressions = safeNum(ins?.impressions);
-  const reach   = safeNum(ins?.reach);
-  const clicks  = safeNum(ins?.clicks);
+  const reach     = safeNum(ins?.reach);
   const purchases = getAction(ins?.actions, "offsite_conversion.fb_pixel_purchase") || getAction(ins?.actions, "purchase");
-  const leads   = getAction(ins?.actions, "lead") || getAction(ins?.actions, "onsite_conversion.lead_grouped");
-  const revenue = spend * roas;
-  const cpa     = purchases > 0 ? spend / purchases : 0;
+  const leads     = getAction(ins?.actions, "lead") || getAction(ins?.actions, "onsite_conversion.lead_grouped");
+  const revenue   = spend * roas;
+  const cpa       = purchases > 0 ? spend / purchases : 0;
 
-  // ── Previous period KPIs ──────────────────────────────────────────────────
-  const prevIns       = prevInsightsData?.data?.[0];
+  // ── Previous period metrics ───────────────────────────────────────────────
+  const prevIns       = prevInsData?.data?.[0];
   const prevSpend     = safeNum(prevIns?.spend);
   const prevRoas      = getPurchaseRoas(prevIns?.purchase_roas);
   const prevCpm       = safeNum(prevIns?.cpm);
   const prevPurchases = getAction(prevIns?.actions, "offsite_conversion.fb_pixel_purchase") || getAction(prevIns?.actions, "purchase");
 
   // ── Campaign data ─────────────────────────────────────────────────────────
-  const allCampaigns: any[] = campaignsData?.data ?? [];
-  const activeCampaigns     = allCampaigns.filter((c: any) => c.status === "ACTIVE");
-  const pausedCampaigns     = allCampaigns.filter((c: any) => c.status === "PAUSED");
-  const adsets: any[]       = (adsetsData?.data ?? []).filter((a: any) => a.status === "ACTIVE").slice(0, 20);
-  const dailyRows: any[]    = (dailyData?.data ?? []).slice(-90);
+  const allCampaigns: any[]  = campaignsData?.data ?? [];
+  const activeCampaigns      = allCampaigns.filter((c: any) => c.status === "ACTIVE");
+  const pausedCampaigns      = allCampaigns.filter((c: any) => c.status === "PAUSED");
+  const adsets: any[]        = (adsetsData?.data ?? []).filter((a: any) => a.status === "ACTIVE").slice(0, 20);
+  const dailyRows: any[]     = (dailyData?.data ?? []).slice(-90);
 
-  // ── Chart data ────────────────────────────────────────────────────────────
+  // ── Chart datasets ────────────────────────────────────────────────────────
 
-  // Dual-axis area chart: daily spend + ROAS
   const dailyChartData = dailyRows.map((d: any) => ({
     date:  d.date_start?.slice(5) ?? "",
     Spend: parseFloat(safeNum(d.spend).toFixed(2)),
     ROAS:  parseFloat(getPurchaseRoas(d.purchase_roas).toFixed(2)),
   }));
 
-  // Horizontal bar chart: top 10 campaigns by spend, colored by ROAS
   const campaignSpendData = allCampaigns
     .map((c: any) => {
       const ci = c.insights?.data?.[0] ?? {};
       const r  = getPurchaseRoas(ci.purchase_roas);
       const s  = safeNum(ci.spend);
       if (s <= 0) return null;
-      return {
-        name:   c.name?.length > 28 ? c.name.slice(0, 28) + "…" : c.name,
-        Spend:  parseFloat(s.toFixed(2)),
-        roas:   r,
-      };
+      return { name: c.name?.length > 28 ? c.name.slice(0, 28) + "…" : c.name, Spend: parseFloat(s.toFixed(2)), roas: r };
     })
     .filter(Boolean)
     .sort((a: any, b: any) => b.Spend - a.Spend)
     .slice(0, 10) as any[];
 
-  // Gender donut
   const genderRows: any[] = genderData?.data ?? [];
   const genderChartData = genderRows.map((g: any) => ({
-    name:  g.gender === "male" ? "ذكور" : g.gender === "female" ? "إناث" : "غير محدد",
+    name:  g.gender === "male" ? "Male" : g.gender === "female" ? "Female" : "Unknown",
     value: parseFloat(safeNum(g.spend).toFixed(2)),
   })).filter((g: any) => g.value > 0);
 
-  // Age bar
   const ageRows: any[] = ageData?.data ?? [];
   const ageChartData = ageRows
-    .map((a: any) => ({
-      age:   a.age ?? "—",
-      Spend: parseFloat(safeNum(a.spend).toFixed(2)),
-    }))
+    .map((a: any) => ({ age: a.age ?? "—", Spend: parseFloat(safeNum(a.spend).toFixed(2)) }))
     .filter((a: any) => a.Spend > 0)
-    .sort((a: any, b: any) => {
-      const aNum = parseInt(a.age?.split("-")[0] ?? "0");
-      const bNum = parseInt(b.age?.split("-")[0] ?? "0");
-      return aNum - bNum;
-    });
+    .sort((a: any, b: any) => parseInt(a.age?.split("-")[0] ?? "0") - parseInt(b.age?.split("-")[0] ?? "0"));
 
-  // Day of week from daily rows
-  const dayNames = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-  const dayMap: Record<number, { spend: number; roas: number; count: number }> = {};
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayMap: Record<number, { spend: number; count: number }> = {};
   dailyRows.forEach((d: any) => {
-    const dt  = new Date(d.date_start);
-    const day = dt.getDay();
-    if (!dayMap[day]) dayMap[day] = { spend: 0, roas: 0, count: 0 };
+    const day = new Date(d.date_start).getDay();
+    if (!dayMap[day]) dayMap[day] = { spend: 0, count: 0 };
     dayMap[day].spend += safeNum(d.spend);
-    dayMap[day].roas  += getPurchaseRoas(d.purchase_roas);
     dayMap[day].count++;
   });
-  const dayChartData = Object.entries(dayMap).map(([day, v]) => ({
-    name:  dayNames[Number(day)],
-    Spend: parseFloat((v.spend / v.count).toFixed(2)),
-  })).sort((a: any, b: any) => b.Spend - a.Spend);
+  const dayChartData = Object.entries(dayMap)
+    .map(([day, v]) => ({ name: dayNames[Number(day)], Spend: parseFloat((v.spend / v.count).toFixed(2)) }))
+    .sort((a, b) => b.Spend - a.Spend);
 
   const GENDER_COLORS = ["#6366f1", "#ec4899", "#a78bfa"];
-  const ROAS_COLOR = (r: number) => r >= 6 ? "#22c55e" : r >= 4 ? "#eab308" : "#ef4444";
+  const roasColor = (r: number) => r >= 6 ? "#22c55e" : r >= 4 ? "#eab308" : "#ef4444";
 
-  // ── PDF generation ─────────────────────────────────────────────────────────
+  // ── PDF export ────────────────────────────────────────────────────────────
 
   const generatePdf = async () => {
     setGenerating(true);
     try {
-      const doc   = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageW = doc.internal.pageSize.getWidth();
+      const doc    = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW  = doc.internal.pageSize.getWidth();
       const margin = 14;
       const contentW = pageW - margin * 2;
 
-      // Header
       doc.setFillColor(12, 12, 18);
       doc.rect(0, 0, pageW, 34, "F");
       doc.setFillColor(212, 175, 55);
@@ -320,23 +225,21 @@ export default function Reports() {
 
       let y = 44;
 
-      // KPI table
       doc.setTextColor(212, 175, 55);
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
       doc.text("Account KPIs", margin, y);
       y += 4;
 
-      const kpiPdf = [
-        ["Total Spend", formatCurr(spend), "Revenue", formatCurr(revenue), "ROAS", `${roas.toFixed(2)}x`],
-        ["CTR", `${ctr.toFixed(2)}%`, "CPM", formatCurr(cpm), "CPC", formatCurr(cpc)],
-        ["CPA", cpa > 0 ? formatCurr(cpa) : "—", "Purchases", fmtNumber(purchases), "Leads", fmtNumber(leads)],
-        ["Reach", fmtNumber(reach), "Impressions", fmtNumber(impressions), "Frequency", freq.toFixed(2)],
-        ["Active Campaigns", String(activeCampaigns.length), "Paused Campaigns", String(pausedCampaigns.length), "Total Campaigns", String(allCampaigns.length)],
-      ];
       autoTable(doc, {
         startY: y,
-        body: kpiPdf,
+        body: [
+          ["Total Spend", formatCurr(spend), "Revenue", formatCurr(revenue), "ROAS", `${roas.toFixed(2)}x`],
+          ["CTR", `${ctr.toFixed(2)}%`, "CPM", formatCurr(cpm), "CPC", formatCurr(cpc)],
+          ["CPA", cpa > 0 ? formatCurr(cpa) : "—", "Purchases", fmtNumber(purchases), "Leads", fmtNumber(leads)],
+          ["Reach", fmtNumber(reach), "Impressions", fmtNumber(impressions), "Frequency", freq.toFixed(2)],
+          ["Active Campaigns", String(activeCampaigns.length), "Paused Campaigns", String(pausedCampaigns.length), "Total Campaigns", String(allCampaigns.length)],
+        ],
         theme: "grid",
         styles: { fontSize: 8.5, cellPadding: 3, textColor: [220, 220, 225], fillColor: [20, 20, 28] },
         columnStyles: {
@@ -352,16 +255,11 @@ export default function Reports() {
       });
       y = (doc as any).lastAutoTable.finalY + 10;
 
-      // Capture charts section as image
       if (chartsRef.current) {
         try {
-          const canvas = await html2canvas(chartsRef.current, {
-            backgroundColor: "#0a0a0a",
-            scale: 1.5,
-            logging: false,
-          });
+          const canvas  = await html2canvas(chartsRef.current, { backgroundColor: "#0a0a0a", scale: 1.5, logging: false });
           const imgData = canvas.toDataURL("image/png");
-          const imgH = (canvas.height / canvas.width) * contentW;
+          const imgH    = (canvas.height / canvas.width) * contentW;
           if (y + imgH > 280) { doc.addPage(); y = 20; }
           doc.setTextColor(212, 175, 55);
           doc.setFontSize(11);
@@ -370,10 +268,9 @@ export default function Reports() {
           y += 4;
           doc.addImage(imgData, "PNG", margin, y, contentW, imgH);
           y += imgH + 10;
-        } catch (_) { /* skip charts if capture fails */ }
+        } catch (_) {}
       }
 
-      // Campaigns table
       if (allCampaigns.length > 0) {
         if (y > 220) { doc.addPage(); y = 20; }
         doc.setTextColor(212, 175, 55);
@@ -392,14 +289,10 @@ export default function Reports() {
               const p  = getAction(d.actions, "offsite_conversion.fb_pixel_purchase") || getAction(d.actions, "purchase");
               const db = safeNum(c.daily_budget) / 100;
               return [
-                c.name?.slice(0, 34) ?? "—",
-                c.status,
-                fmtCurrency(safeNum(d.spend), currency),
-                `${r.toFixed(2)}x`,
-                `${safeNum(d.ctr).toFixed(2)}%`,
-                fmtCurrency(safeNum(d.cpm), currency),
-                fmtNumber(p),
-                db > 0 ? fmtCurrency(db, currency) : "—",
+                c.name?.slice(0, 34) ?? "—", c.status,
+                fmtCurrency(safeNum(d.spend), currency), `${r.toFixed(2)}x`,
+                `${safeNum(d.ctr).toFixed(2)}%`, fmtCurrency(safeNum(d.cpm), currency),
+                fmtNumber(p), db > 0 ? fmtCurrency(db, currency) : "—",
               ];
             })
             .sort((a: any, b: any) => parseFloat(b[2].replace(/[^0-9.]/g, "")) - parseFloat(a[2].replace(/[^0-9.]/g, ""))),
@@ -424,7 +317,6 @@ export default function Reports() {
         y = (doc as any).lastAutoTable.finalY + 10;
       }
 
-      // Footer
       const pageCount = (doc.internal as any).getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
@@ -432,7 +324,7 @@ export default function Reports() {
         doc.rect(0, 285, pageW, 12, "F");
         doc.setFontSize(7);
         doc.setTextColor(80, 80, 100);
-        doc.text("تقرير معد بواسطة JOEX Dashboard", margin, 291);
+        doc.text("Generated by JOEX Dashboard", margin, 291);
         doc.text(`Page ${i} of ${pageCount}  |  ${selectedAccountName || selectedAccountId}  |  ${since} -> ${until}`, pageW - margin, 291, { align: "right" });
       }
 
@@ -443,118 +335,52 @@ export default function Reports() {
     }
   };
 
-  // ── UI ─────────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6 pb-10">
 
-      {/* Top bar */}
+      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
             <FileText className="h-8 w-8 text-primary" />
-            التقارير
+            Reports
           </h2>
-          <p className="text-muted-foreground mt-1 text-sm" dir="rtl">
+          <p className="text-muted-foreground mt-1 text-sm">
             <span className="text-foreground font-medium">{selectedAccountName || selectedAccountId}</span>
-            {" — "}{since} إلى {until}
-            {activeCampaigns.length > 0 && <span> · {activeCampaigns.length} حملة نشطة</span>}
+            {" — "}{since} → {until}
+            {activeCampaigns.length > 0 && <span> · {activeCampaigns.length} active campaign{activeCampaigns.length !== 1 ? "s" : ""}</span>}
           </p>
         </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Date preset dropdown */}
-          <div className="relative">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 gap-2 text-sm border-white/10 bg-card/50"
-              onClick={() => setPresetOpen((o) => !o)}
-            >
-              {presetLabel}
-              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-            </Button>
-            {presetOpen && (
-              <div className="absolute right-0 top-10 z-50 bg-[#161622] border border-white/10 rounded-xl shadow-2xl w-52 py-1 overflow-hidden">
-                {DATE_PRESETS.map((p, i) => (
-                  <button
-                    key={p.value}
-                    dir="rtl"
-                    className={`w-full text-right px-4 py-2 text-sm hover:bg-white/5 transition-colors ${
-                      preset === p.value ? "text-primary font-semibold bg-primary/5" : "text-foreground"
-                    } ${p.value === "custom" ? "border-t border-white/10 mt-1" : ""}`}
-                    onClick={() => { setPreset(p.value); setPresetOpen(false); }}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Custom date pickers (shown only when custom selected) */}
-          {preset === "custom" && (
-            <div className="flex items-center gap-2">
-              <Input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="h-9 text-sm border-white/10 bg-card/50 w-36"
-              />
-              <span className="text-muted-foreground text-sm">إلى</span>
-              <Input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="h-9 text-sm border-white/10 bg-card/50 w-36"
-              />
-            </div>
-          )}
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 border-white/10 bg-card/50 gap-2 text-sm"
-            onClick={() => setPreset(preset)}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            تحديث
-          </Button>
-
-          <Button
-            onClick={generatePdf}
-            disabled={isLoading || generating}
-            size="sm"
-            className="h-9 bg-primary hover:bg-primary/90 text-black gap-2 text-sm font-semibold"
-          >
-            {generating ? (
-              <><Loader2 className="h-3.5 w-3.5 animate-spin" />جار التحميل…</>
-            ) : (
-              <><Download className="h-3.5 w-3.5" />تحميل PDF</>
-            )}
-          </Button>
-        </div>
+        <Button
+          onClick={generatePdf}
+          disabled={isLoading || generating}
+          size="sm"
+          className="h-9 bg-primary hover:bg-primary/90 text-black gap-2 text-sm font-semibold"
+        >
+          {generating
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Generating…</>
+            : <><Download className="h-3.5 w-3.5" />Download PDF</>
+          }
+        </Button>
       </div>
 
-      {/* 4 KPI cards */}
+      {/* 4 primary KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="bg-card/40 border-card-border">
-              <CardContent className="p-5 space-y-2">
-                <Skeleton className="h-3 w-16" />
-                <Skeleton className="h-7 w-28" />
-                <Skeleton className="h-3 w-12" />
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          <>
-            {[
-              { label: "الإنفاق",    value: formatCurr(spend),             icon: DollarSign,    curr: spend,     prev: prevSpend,     higher: false },
-              { label: "ROAS",       value: `${roas.toFixed(2)}x`,         icon: TrendingUp,    curr: roas,      prev: prevRoas,      higher: true  },
-              { label: "مشتريات",   value: fmtNumber(purchases),           icon: ShoppingCart,  curr: purchases, prev: prevPurchases, higher: true  },
-              { label: "CPM",        value: formatCurr(cpm),               icon: DollarSign,    curr: cpm,       prev: prevCpm,       higher: false },
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i} className="bg-card/40 border-card-border">
+                <CardContent className="p-5 space-y-2">
+                  <Skeleton className="h-3 w-16" /><Skeleton className="h-7 w-28" /><Skeleton className="h-3 w-12" />
+                </CardContent>
+              </Card>
+            ))
+          : [
+              { label: "Spend",     value: formatCurr(spend),         icon: DollarSign,   curr: spend,     prev: prevSpend,     higher: false },
+              { label: "ROAS",      value: `${roas.toFixed(2)}x`,     icon: TrendingUp,   curr: roas,      prev: prevRoas,      higher: true  },
+              { label: "Purchases", value: fmtNumber(purchases),       icon: ShoppingCart, curr: purchases, prev: prevPurchases, higher: true  },
+              { label: "CPM",       value: formatCurr(cpm),           icon: DollarSign,   curr: cpm,       prev: prevCpm,       higher: false },
             ].map((kpi) => {
               const Icon = kpi.icon;
               return (
@@ -562,7 +388,7 @@ export default function Reports() {
                   <Card className="bg-card/40 border-card-border hover:border-primary/30 transition-colors">
                     <CardContent className="p-5">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs text-muted-foreground font-medium" dir="rtl">{kpi.label}</span>
+                        <span className="text-xs text-muted-foreground font-medium">{kpi.label}</span>
                         <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center">
                           <Icon className="h-3.5 w-3.5 text-primary" />
                         </div>
@@ -573,31 +399,30 @@ export default function Reports() {
                   </Card>
                 </motion.div>
               );
-            })}
-          </>
-        )}
+            })
+        }
       </div>
 
       {/* Secondary KPI strip */}
       {!isLoading && (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
           {[
-            { label: "الإيرادات",    value: formatCurr(revenue)       },
-            { label: "CTR",          value: `${ctr.toFixed(2)}%`       },
-            { label: "CPC",          value: formatCurr(cpc)            },
-            { label: "CPA",          value: cpa > 0 ? formatCurr(cpa) : "—" },
-            { label: "التكرار",      value: freq.toFixed(2)            },
-            { label: "الوصول",       value: fmtNumber(reach)           },
-            { label: "انطباعات",     value: fmtNumber(impressions)     },
-            { label: "ليدز",         value: fmtNumber(leads)           },
-            { label: "حملات نشطة",  value: String(activeCampaigns.length) },
-            { label: "حملات موقوفة", value: String(pausedCampaigns.length) },
-            { label: "إجمالي حملات", value: String(allCampaigns.length) },
-            { label: "أد سيتس نشطة", value: String(adsets.length)     },
+            { label: "Revenue",          value: formatCurr(revenue)           },
+            { label: "CTR",              value: `${ctr.toFixed(2)}%`           },
+            { label: "CPC",              value: formatCurr(cpc)                },
+            { label: "CPA",              value: cpa > 0 ? formatCurr(cpa) : "—" },
+            { label: "Frequency",        value: freq.toFixed(2)                },
+            { label: "Reach",            value: fmtNumber(reach)               },
+            { label: "Impressions",      value: fmtNumber(impressions)         },
+            { label: "Leads",            value: fmtNumber(leads)               },
+            { label: "Active Campaigns", value: String(activeCampaigns.length) },
+            { label: "Paused Campaigns", value: String(pausedCampaigns.length) },
+            { label: "Total Campaigns",  value: String(allCampaigns.length)    },
+            { label: "Active Ad Sets",   value: String(adsets.length)          },
           ].map((kpi) => (
             <Card key={kpi.label} className="bg-card/30 border-card-border">
               <CardContent className="p-3">
-                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5" dir="rtl">{kpi.label}</div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">{kpi.label}</div>
                 <div className="text-sm font-bold font-mono text-foreground">{kpi.value}</div>
               </CardContent>
             </Card>
@@ -605,19 +430,18 @@ export default function Reports() {
         </div>
       )}
 
-      {/* Charts section — captured by html2canvas for PDF */}
+      {/* Charts — captured by html2canvas for PDF */}
       <div ref={chartsRef} className="space-y-4" style={{ background: "transparent" }}>
 
-        {/* Charts row 1: Spend/ROAS area chart + Campaign spend bar */}
+        {/* Row 1: Daily spend/ROAS area + Campaign spend bar */}
         {!isLoading && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-            {/* Dual-axis area chart: Spend + ROAS */}
             <Card className="bg-card/40 border-card-border">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2" dir="rtl">
+                <CardTitle className="text-sm flex items-center gap-2">
                   <TrendingUp className="h-4 w-4 text-primary" />
-                  الإنفاق اليومي vs ROAS
+                  Daily Spend vs ROAS
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -644,21 +468,20 @@ export default function Reports() {
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">لا توجد بيانات يومية</div>
+                  <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">No daily data available</div>
                 )}
                 <div className="flex gap-4 mt-1 justify-center text-[10px] text-muted-foreground">
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#D4AF37] inline-block" />الإنفاق</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#D4AF37] inline-block" />Spend</span>
                   <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-500 inline-block" />ROAS</span>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Horizontal bar: campaign spend colored by ROAS */}
             <Card className="bg-card/40 border-card-border">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2" dir="rtl">
+                <CardTitle className="text-sm flex items-center gap-2">
                   <DollarSign className="h-4 w-4 text-primary" />
-                  توزيع الإنفاق على الحملات
+                  Spend by Campaign
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -671,13 +494,13 @@ export default function Reports() {
                       <Tooltip content={<ChartTooltip currency={currency} />} />
                       <Bar dataKey="Spend" radius={[0, 4, 4, 0]} maxBarSize={14}>
                         {campaignSpendData.map((entry: any) => (
-                          <Cell key={entry.name} fill={ROAS_COLOR(entry.roas)} />
+                          <Cell key={entry.name} fill={roasColor(entry.roas)} />
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">لا توجد حملات بإنفاق</div>
+                  <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">No campaign spend data</div>
                 )}
                 <div className="flex gap-4 mt-1 justify-center text-[10px] text-muted-foreground">
                   <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-green-500 inline-block" />ROAS &gt; 6x</span>
@@ -689,24 +512,21 @@ export default function Reports() {
           </div>
         )}
 
-        {/* Charts row 2: Gender donut + Age bar + Day bar */}
+        {/* Row 2: Gender donut + Age bar + Day-of-week bar */}
         {!isLoading && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-            {/* Gender donut */}
             <Card className="bg-card/40 border-card-border">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm" dir="rtl">التوزيع حسب الجنس</CardTitle>
+                <CardTitle className="text-sm">Gender Breakdown</CardTitle>
               </CardHeader>
               <CardContent>
                 {genderChartData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={180}>
                     <PieChart>
                       <Pie
-                        data={genderChartData}
-                        cx="50%" cy="50%"
-                        innerRadius={45} outerRadius={70}
-                        paddingAngle={3}
+                        data={genderChartData} cx="50%" cy="50%"
+                        innerRadius={45} outerRadius={70} paddingAngle={3}
                         dataKey="value"
                         label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                         labelLine={false}
@@ -719,15 +539,14 @@ export default function Reports() {
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">بيانات الجنس غير متوفرة</div>
+                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">Gender data not available</div>
                 )}
               </CardContent>
             </Card>
 
-            {/* Age bar */}
             <Card className="bg-card/40 border-card-border">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm" dir="rtl">التوزيع حسب العمر</CardTitle>
+                <CardTitle className="text-sm">Age Breakdown</CardTitle>
               </CardHeader>
               <CardContent>
                 {ageChartData.length > 0 ? (
@@ -741,33 +560,32 @@ export default function Reports() {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">بيانات العمر غير متوفرة</div>
+                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">Age data not available</div>
                 )}
               </CardContent>
             </Card>
 
-            {/* Day of week */}
             <Card className="bg-card/40 border-card-border">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm" dir="rtl">أفضل أيام الأداء</CardTitle>
+                <CardTitle className="text-sm">Best Performing Days</CardTitle>
               </CardHeader>
               <CardContent>
                 {dayChartData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={180}>
                     <BarChart data={dayChartData} margin={{ left: 0, right: 4, top: 4, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fontSize: 8, fill: "#888" }} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#888" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 9, fill: "#666" }} axisLine={false} tickLine={false} tickFormatter={(v) => fmtNumber(v)} />
                       <Tooltip content={<ChartTooltip currency={currency} />} />
                       <Bar dataKey="Spend" radius={[3, 3, 0, 0]} maxBarSize={28}>
-                        {dayChartData.map((entry: any, i: number) => (
+                        {dayChartData.map((_: any, i: number) => (
                           <Cell key={i} fill={i === 0 ? "#D4AF37" : "#6366f1"} />
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">بيانات أيام الأسبوع غير متوفرة</div>
+                  <div className="h-[180px] flex items-center justify-center text-muted-foreground text-xs text-center">Day data not available</div>
                 )}
               </CardContent>
             </Card>
@@ -779,18 +597,18 @@ export default function Reports() {
       {!isLoading && allCampaigns.length > 0 && (
         <Card className="bg-card/40 border-card-border">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2" dir="rtl">
+            <CardTitle className="text-base flex items-center gap-2">
               <LayoutDashboard className="h-4 w-4 text-primary" />
-              الحملات ({allCampaigns.length})
+              Campaigns ({allCampaigns.length})
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" dir="rtl">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-white/5 text-[11px] text-muted-foreground uppercase tracking-wide">
-                    {["اسم الحملة", "الحالة", "الإنفاق", "ROAS", "CTR", "CPM", "مشتريات", "الميزانية اليومية"].map((h) => (
-                      <th key={h} className="px-4 py-3 text-right font-medium">{h}</th>
+                    {["Campaign", "Status", "Spend", "ROAS", "CTR", "CPM", "Purchases", "Daily Budget"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -798,26 +616,23 @@ export default function Reports() {
                   {[...allCampaigns]
                     .sort((a: any, b: any) => safeNum(b.insights?.data?.[0]?.spend) - safeNum(a.insights?.data?.[0]?.spend))
                     .map((c: any) => {
-                      const d    = c.insights?.data?.[0] ?? {};
-                      const r    = getPurchaseRoas(d.purchase_roas);
-                      const s    = safeNum(d.spend);
-                      const p    = getAction(d.actions, "offsite_conversion.fb_pixel_purchase") || getAction(d.actions, "purchase");
-                      const db   = safeNum(c.daily_budget) / 100;
-                      const isActive = c.status === "ACTIVE";
-                      const roasColor = r >= 6 ? "text-green-400" : r >= 4 ? "text-yellow-400" : r > 0 ? "text-red-400" : "text-muted-foreground";
+                      const d  = c.insights?.data?.[0] ?? {};
+                      const r  = getPurchaseRoas(d.purchase_roas);
+                      const s  = safeNum(d.spend);
+                      const p  = getAction(d.actions, "offsite_conversion.fb_pixel_purchase") || getAction(d.actions, "purchase");
+                      const db = safeNum(c.daily_budget) / 100;
+                      const isActive  = c.status === "ACTIVE";
+                      const rc = r >= 6 ? "text-green-400" : r >= 4 ? "text-yellow-400" : r > 0 ? "text-red-400" : "text-muted-foreground";
                       return (
                         <tr key={c.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                           <td className="px-4 py-3 font-medium text-foreground max-w-[220px] truncate">{c.name}</td>
                           <td className="px-4 py-3">
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] px-2 py-0.5 ${isActive ? "border-green-500/40 text-green-400 bg-green-500/10" : "border-white/10 text-muted-foreground bg-white/5"}`}
-                            >
-                              {isActive ? "نشط" : "موقوف"}
+                            <Badge variant="outline" className={`text-[10px] px-2 py-0.5 ${isActive ? "border-green-500/40 text-green-400 bg-green-500/10" : "border-white/10 text-muted-foreground bg-white/5"}`}>
+                              {isActive ? "Active" : "Paused"}
                             </Badge>
                           </td>
                           <td className="px-4 py-3 font-mono text-foreground">{s > 0 ? formatCurr(s) : "—"}</td>
-                          <td className={`px-4 py-3 font-mono font-semibold ${roasColor}`}>{r > 0 ? `${r.toFixed(2)}x` : "—"}</td>
+                          <td className={`px-4 py-3 font-mono font-semibold ${rc}`}>{r > 0 ? `${r.toFixed(2)}x` : "—"}</td>
                           <td className="px-4 py-3 font-mono text-muted-foreground">{safeNum(d.ctr) > 0 ? `${safeNum(d.ctr).toFixed(2)}%` : "—"}</td>
                           <td className="px-4 py-3 font-mono text-muted-foreground">{safeNum(d.cpm) > 0 ? formatCurr(safeNum(d.cpm)) : "—"}</td>
                           <td className="px-4 py-3 font-mono text-foreground">{p > 0 ? fmtNumber(p) : "—"}</td>
@@ -832,13 +647,10 @@ export default function Reports() {
         </Card>
       )}
 
-      {/* Loading skeleton for table */}
       {isLoading && (
         <Card className="bg-card/40 border-card-border">
           <CardContent className="p-6 space-y-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
           </CardContent>
         </Card>
       )}
