@@ -219,7 +219,7 @@ export async function callProvider(
 
     const response = await client.messages.create({
       model:      resolvedModel,
-      max_tokens: 1500,
+      max_tokens: 4000,
       system:     systemPrompt,
       messages:   anthropicMessages,
       tools:      anthropicTools as any,
@@ -262,7 +262,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1500,
+        max_tokens: 4000,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),
@@ -296,7 +296,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1500,
+        max_tokens: 4000,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),
@@ -342,7 +342,7 @@ export async function callProvider(
         },
         body: JSON.stringify({
           messages:   [{ role: "system", content: systemPrompt }, ...cfMessages],
-          max_tokens: 1500,
+          max_tokens: 4000,
         }),
         signal: AbortSignal.timeout(30_000),
       },
@@ -369,7 +369,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model:      "deepseek/deepseek-v4-flash:free",
-        max_tokens: 1500,
+        max_tokens: 4000,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),
@@ -405,7 +405,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model:      "openrouter/free",
-        max_tokens: 1500,
+        max_tokens: 4000,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),

@@ -1970,6 +1970,7 @@ EXECUTION RULES:
 - Budget changes: state old value → new value.
 - Never say "Let me fetch", "Let me think", "Now I will". Just execute and report results.
 - Token budget: be concise. Lead with the answer, support with evidence.
+- If the analysis is large, split it into labeled sections. Complete each section fully before moving to the next. Never stop mid-section.
 
 BRAIN UPDATE RULE: When user says حدث عقلك or any brain update request:
 1. First call get_account_overview to get fresh KPIs

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
 import { useAccountStore } from "@/store/accountStore";
 import { useDateStore } from "@/store/dateStore";
 import { useAccountCurrency } from "@/hooks/useCurrency";
@@ -437,8 +438,30 @@ function AssistantBubble({
 
         {/* Text content */}
         {content && (
-          <div className="px-4 py-3 rounded-xl rounded-tl-sm bg-card/60 border border-card-border text-card-foreground text-sm leading-relaxed whitespace-pre-wrap">
-            {content}
+          <div className="px-4 py-3 rounded-xl rounded-tl-sm bg-card/60 border border-card-border text-card-foreground text-sm leading-relaxed">
+            <ReactMarkdown
+              components={{
+                h1: ({ children }) => <h1 className="text-lg font-bold text-foreground mt-3 mb-1.5 first:mt-0">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-base font-bold text-foreground mt-3 mb-1 first:mt-0">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-semibold text-foreground mt-2 mb-1 first:mt-0">{children}</h3>,
+                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                em: ({ children }) => <em className="italic text-muted-foreground">{children}</em>,
+                ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                code: ({ children, className }) => {
+                  const isBlock = className?.includes("language-");
+                  return isBlock
+                    ? <code className="block bg-muted/50 border border-border rounded-md px-3 py-2 text-xs font-mono my-2 whitespace-pre-wrap overflow-x-auto">{children}</code>
+                    : <code className="bg-muted/50 border border-border rounded px-1 py-0.5 text-xs font-mono">{children}</code>;
+                },
+                blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-3 text-muted-foreground italic my-2">{children}</blockquote>,
+                hr: () => <hr className="border-border my-3" />,
+              }}
+            >
+              {content}
+            </ReactMarkdown>
             {isStreaming && (
               <span className="inline-block ml-0.5 w-0.5 h-4 bg-primary/70 animate-pulse align-middle" />
             )}
