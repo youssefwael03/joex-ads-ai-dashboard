@@ -58,6 +58,11 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
     until: () => format(new Date(), "yyyy-MM-dd"),
   },
   {
+    label: "Last 90 Days",
+    since: () => format(subDays(new Date(), 89), "yyyy-MM-dd"),
+    until: () => format(new Date(), "yyyy-MM-dd"),
+  },
+  {
     label: "This Week",
     since: () => format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd"),
     until: () => format(new Date(), "yyyy-MM-dd"),
@@ -79,10 +84,13 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
   },
   {
     label: "Maximum",
-    since: () => "2020-01-01",
+    since: () => format(subMonths(new Date(), 36), "yyyy-MM-dd"),
     until: () => format(new Date(), "yyyy-MM-dd"),
   },
 ];
+
+// Meta API hard limit: 37 months back from today
+const META_EARLIEST = subMonths(new Date(), 36);
 
 interface TopbarProps {
   onToggleDebug?: () => void;
@@ -195,6 +203,8 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
                 onSelect={setCalRange}
                 numberOfMonths={2}
                 defaultMonth={new Date(since)}
+                fromMonth={META_EARLIEST}
+                toDate={new Date()}
                 className="rounded-md"
               />
               <div className="flex justify-end gap-2 p-3 border-t border-border">
@@ -294,6 +304,8 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
               onSelect={setCalRange}
               numberOfMonths={1}
               defaultMonth={new Date(since)}
+              fromMonth={META_EARLIEST}
+              toDate={new Date()}
               className="rounded-md"
             />
             <div className="flex justify-end gap-2 p-3 border-t border-border">
