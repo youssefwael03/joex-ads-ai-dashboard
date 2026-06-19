@@ -168,9 +168,17 @@ router.get("/meta/insights-daily", async (req, res): Promise<void> => {
     ? { time_range: JSON.stringify({ since, until }) }
     : { date_preset: "last_30d" };
 
+  // Auto-select granularity so Meta doesn't reject large ranges:
+  // ≤90 days → daily, ≤365 days → weekly, >365 days → monthly
+  const dayDiff = since && until
+    ? Math.ceil((new Date(until).getTime() - new Date(since).getTime()) / 86_400_000)
+    : 30;
+  const timeIncrement = dayDiff <= 90 ? "1" : dayDiff <= 365 ? "7" : "monthly";
+
   const params: Record<string, string> = {
     fields: "date_start,date_stop,spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,action_values,purchase_roas",
-    time_increment: "1",
+    time_increment: timeIncrement,
+    limit: "500",
     level: "account",
     ...dateParams,
   };
@@ -191,13 +199,25 @@ router.get("/meta/insights-breakdown", async (req, res): Promise<void> => {
   const since = qs(req.query.since);
   const until = qs(req.query.until);
 
-  const dateParams: Record<string, string> = since && until
-    ? { time_range: JSON.stringify({ since, until }) }
+  // Meta breakdown API is unreliable for ranges >90 days — cap to last 90 days
+  let effectiveSince = since;
+  if (since && until) {
+    const dayDiff = Math.ceil((new Date(until).getTime() - new Date(since).getTime()) / 86_400_000);
+    if (dayDiff > 90) {
+      const capStart = new Date(until);
+      capStart.setDate(capStart.getDate() - 89);
+      effectiveSince = capStart.toISOString().split("T")[0];
+    }
+  }
+
+  const dateParams: Record<string, string> = effectiveSince && until
+    ? { time_range: JSON.stringify({ since: effectiveSince, until }) }
     : { date_preset: "last_30d" };
 
   const params: Record<string, string> = {
-    fields: "spend,impressions,reach,clicks,ctr,cpm,cpc",
+    fields: "spend,impressions,reach,clicks,ctr,cpm,cpc,actions",
     breakdowns: breakdown,
+    limit: "200",
     level: "account",
     ...dateParams,
   };

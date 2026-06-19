@@ -122,37 +122,56 @@ export default function Dashboard() {
   const metaErr = insightsData?.error;
 
   // ── KPI derivations ──────────────────────────────────────────────────────────
-  const spend = safeNum(insights?.spend);
+  const spend       = safeNum(insights?.spend);
   const impressions = safeNum(insights?.impressions);
-  const reach = safeNum(insights?.reach);
-  const clicks = safeNum(insights?.clicks);
-  const ctr = safeNum(insights?.ctr);
-  const cpm = safeNum(insights?.cpm);
-  const cpc = safeNum(insights?.cpc);
-  const frequency = safeNum(insights?.frequency);
-  const roas = getPurchaseRoas(insights?.purchase_roas);
-  const purchases = getAction(insights?.actions, "offsite_conversion.fb_pixel_purchase")
-    || getAction(insights?.actions, "purchase");
-  const revenue = spend > 0 && roas > 0 ? spend * roas : 0;
-  const cpa = purchases > 0 ? spend / purchases : 0;
-  const conversionRate = clicks > 0 && purchases > 0 ? (purchases / clicks) * 100 : 0;
-  const linkClicks = getAction(insights?.actions, "link_click")
+  const reach       = safeNum(insights?.reach);
+  const clicks      = safeNum(insights?.clicks);
+  const ctr         = safeNum(insights?.ctr);
+  const cpm         = safeNum(insights?.cpm);
+  const cpc         = safeNum(insights?.cpc);
+  const frequency   = safeNum(insights?.frequency);
+  const roas        = getPurchaseRoas(insights?.purchase_roas);
+  const linkClicks  = getAction(insights?.actions, "link_click")
     || getAction(insights?.actions, "outbound_click");
 
+  // Purchase conversions (e-commerce pixel)
+  const purchases = getAction(insights?.actions, "offsite_conversion.fb_pixel_purchase")
+    || getAction(insights?.actions, "purchase")
+    || getAction(insights?.actions, "omni_purchase");
+
+  // Lead conversions (lead gen accounts)
+  const leads = getAction(insights?.actions, "lead")
+    || getAction(insights?.actions, "onsite_conversion.lead_grouped");
+
+  // Revenue: sum all action_values first; fall back to spend × ROAS
+  const actionValuesTotal = Array.isArray(insights?.action_values)
+    ? (insights.action_values as any[]).reduce((s: number, av: any) => s + safeNum(av.value), 0)
+    : 0;
+  const revenue = actionValuesTotal > 0 ? actionValuesTotal
+    : (roas > 0 ? spend * roas : 0);
+
+  // Auto-detect account type: use leads when no purchases tracked
+  const isLeadGen      = purchases === 0 && leads > 0;
+  const primaryConv    = isLeadGen ? leads : purchases;
+  const convLabel      = isLeadGen ? "Leads"    : "Purchases";
+  const costPerConvLbl = isLeadGen ? "CPL"      : "CPA";
+  const costPerConv    = primaryConv > 0 ? spend / primaryConv : 0;
+  const convRate       = clicks > 0 && primaryConv > 0 ? (primaryConv / clicks) * 100 : 0;
+
   const kpis = [
-    { label: "Total Spend", value: fmt(spend), highlight: false },
-    { label: "Revenue", value: fmt(revenue), highlight: revenue > 0 },
-    { label: "ROAS", value: `${roas.toFixed(2)}x`, highlight: roas >= 2 },
-    { label: "CTR", value: `${ctr.toFixed(2)}%`, highlight: false },
-    { label: "CPM", value: fmt(cpm), highlight: false },
-    { label: "CPC", value: fmt(cpc), highlight: false },
-    { label: "CPA", value: cpa > 0 ? fmt(cpa) : "—", highlight: false },
-    { label: "Frequency", value: frequency.toFixed(2), highlight: frequency > 4 },
-    { label: "Reach", value: fmtNumber(reach), highlight: false },
-    { label: "Impressions", value: fmtNumber(impressions), highlight: false },
-    { label: "Link Clicks", value: fmtNumber(linkClicks), highlight: false },
-    { label: "Purchases", value: fmtNumber(purchases), highlight: purchases > 0 },
-    { label: "Conv. Rate", value: conversionRate > 0 ? `${conversionRate.toFixed(2)}%` : "—", highlight: false },
+    { label: "Total Spend",   value: fmt(spend),                                       highlight: false              },
+    { label: "Revenue",       value: revenue > 0 ? fmt(revenue) : "—",                 highlight: revenue > 0        },
+    { label: "ROAS",          value: roas > 0 ? `${roas.toFixed(2)}x` : "—",           highlight: roas >= 2          },
+    { label: "CTR",           value: `${ctr.toFixed(2)}%`,                             highlight: false              },
+    { label: "CPM",           value: fmt(cpm),                                         highlight: false              },
+    { label: "CPC",           value: fmt(cpc),                                         highlight: false              },
+    { label: costPerConvLbl,  value: costPerConv > 0 ? fmt(costPerConv) : "—",         highlight: false              },
+    { label: "Frequency",     value: frequency.toFixed(2),                             highlight: frequency > 4      },
+    { label: "Reach",         value: fmtNumber(reach),                                 highlight: false              },
+    { label: "Impressions",   value: fmtNumber(impressions),                           highlight: false              },
+    { label: "Link Clicks",   value: fmtNumber(linkClicks),                            highlight: false              },
+    { label: convLabel,       value: fmtNumber(primaryConv),                           highlight: primaryConv > 0    },
+    { label: "Conv. Rate",    value: convRate > 0 ? `${convRate.toFixed(2)}%` : "—",   highlight: false              },
   ];
 
   // ── Chart data ───────────────────────────────────────────────────────────────
