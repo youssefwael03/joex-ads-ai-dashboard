@@ -4,7 +4,7 @@ import pRetry from "p-retry";
 /**
  * Batch Processing Utilities for Anthropic
  *
- * Supported models: claude-opus-4-7 (most capable), claude-sonnet-4-6 (balanced), claude-haiku-4-5 (fastest)
+ * Supported models: claude-opus-4-8 (most capable), claude-sonnet-4-6 (balanced), claude-haiku-4-5 (fastest)
  *
  * USAGE:
  * ```typescript
