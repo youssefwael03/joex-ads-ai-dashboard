@@ -5,9 +5,10 @@ import { useDateStore } from "@/store/dateStore";
 import { useAdAccounts, useMe } from "@/hooks/useMeta";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Calendar } from "@/components/ui/calendar";
-import { CheckCircle2, LogOut, CalendarIcon, Bug, Menu } from "lucide-react";
+import { CheckCircle2, LogOut, CalendarIcon, Bug, Menu, ChevronDown, Pencil } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   format,
@@ -92,8 +93,6 @@ const PRESETS: { label: string; since: () => string; until: () => string }[] = [
   },
 ];
 
-const ALL_ITEMS = [...PRESETS.map((p) => p.label), "Custom"];
-
 interface TopbarProps {
   onToggleDebug?: () => void;
   debugOpen?: boolean;
@@ -106,11 +105,14 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
   const { since, until, preset, setDateRange } = useDateStore();
   const [, setLocation] = useLocation();
 
+  // Preset popover
+  const [presetOpen, setPresetOpen] = useState(false);
+
   // Custom date dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [calRange, setCalRange] = useState<DateRange | undefined>({
-    from: new Date(since),
-    to: new Date(until),
+    from: subDays(new Date(), 6),
+    to: new Date(),
   });
 
   const { data: meData } = useMe(isValidated);
@@ -125,16 +127,23 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
     }
   }, [accountsData, selectedAccountId, selectAccount, setAccounts]);
 
-  const handlePreset = (label: string) => {
-    if (label === "Custom") {
-      // Seed the calendar with the current range so it opens on the right month
+  // Always opens the calendar dialog, seeding:
+  //   • last 7 days if currently on a preset (so calendar lands on today)
+  //   • the existing custom range if we're already on "Custom"
+  const openCustomDialog = () => {
+    if (preset === "Custom") {
       setCalRange({ from: new Date(since), to: new Date(until) });
-      setDialogOpen(true);
-      return;
+    } else {
+      setCalRange({ from: subDays(new Date(), 6), to: new Date() });
     }
+    setDialogOpen(true);
+  };
+
+  const handlePreset = (label: string) => {
     const p = PRESETS.find((x) => x.label === label);
     if (!p) return;
     setDateRange(p.since(), p.until(), label);
+    setPresetOpen(false);
   };
 
   const applyCustomRange = () => {
@@ -148,8 +157,10 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
     }
   };
 
-  // Select display value — show "Custom (since → until)" when active
-  const selectValue = preset === "Custom" ? "Custom" : preset;
+  // Label shown on the date trigger button
+  const presetLabel = preset === "Custom"
+    ? `${since} → ${until}`
+    : preset;
 
   return (
     <div className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-20">
@@ -163,13 +174,39 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
               Custom Date Range
             </DialogTitle>
           </DialogHeader>
+
+          {/* Quick-pick shortcuts inside the dialog */}
+          <div className="px-4 pt-3 pb-1 flex flex-wrap gap-1.5">
+            {(["Last 7 Days", "Last 14 Days", "Last 30 Days", "Last 90 Days"] as const).map((lbl) => {
+              const p = PRESETS.find((x) => x.label === lbl)!;
+              const isActive =
+                calRange?.from && calRange?.to &&
+                format(calRange.from, "yyyy-MM-dd") === p.since() &&
+                format(calRange.to, "yyyy-MM-dd") === p.until();
+              return (
+                <button
+                  key={lbl}
+                  onClick={() => setCalRange({ from: new Date(p.since()), to: new Date(p.until()) })}
+                  className={cn(
+                    "text-xs px-2.5 py-1 rounded-md border transition-colors",
+                    isActive
+                      ? "bg-primary text-black border-primary"
+                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
+                  )}
+                >
+                  {lbl}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="p-2">
             <Calendar
               mode="range"
               selected={calRange}
               onSelect={setCalRange}
               numberOfMonths={2}
-              defaultMonth={calRange?.from ?? new Date(since)}
+              defaultMonth={subMonths(new Date(), 1)}
               fromMonth={META_EARLIEST}
               toDate={new Date()}
               className="rounded-md"
@@ -231,23 +268,63 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
             </SelectContent>
           </Select>
 
-          {/* Date preset selector */}
-          <Select value={selectValue} onValueChange={handlePreset}>
-            <SelectTrigger
-              className="w-[155px] lg:w-[190px] bg-background border-border text-sm"
-              data-testid="select-date-preset"
-            >
-              <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground mr-1 flex-shrink-0" />
-              <SelectValue placeholder="Date range" />
-            </SelectTrigger>
-            <SelectContent>
-              {ALL_ITEMS.map((label) => (
-                <SelectItem key={label} value={label}>
-                  {label}
-                </SelectItem>
+          {/* Date preset — Popover so "Custom" always opens the dialog */}
+          <Popover open={presetOpen} onOpenChange={setPresetOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 bg-background border-border text-sm font-normal px-3 max-w-[220px] lg:max-w-[260px]"
+                data-testid="select-date-preset"
+              >
+                <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                <span className="truncate">{presetLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0 ml-auto" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-48 p-1 bg-card border-border">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => handlePreset(p.label)}
+                  className={cn(
+                    "w-full text-left text-sm px-3 py-1.5 rounded-sm transition-colors",
+                    preset === p.label
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-foreground hover:bg-muted/50",
+                  )}
+                >
+                  {p.label}
+                </button>
               ))}
-            </SelectContent>
-          </Select>
+              <div className="my-1 border-t border-border" />
+              <button
+                onClick={() => { setPresetOpen(false); openCustomDialog(); }}
+                className={cn(
+                  "w-full text-left text-sm px-3 py-1.5 rounded-sm transition-colors flex items-center gap-2",
+                  preset === "Custom"
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-foreground hover:bg-muted/50",
+                )}
+              >
+                <Pencil className="h-3 w-3" />
+                Custom range...
+              </button>
+            </PopoverContent>
+          </Popover>
+
+          {/* When Custom is active, show an edit button to reopen the calendar */}
+          {preset === "Custom" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={openCustomDialog}
+              className="h-8 w-8 text-primary hover:bg-primary/10 flex-shrink-0"
+              title="Edit custom date range"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          )}
 
           {/* Active date display */}
           <span className="text-xs text-muted-foreground hidden xl:block font-mono bg-background border border-border px-2 py-1 rounded whitespace-nowrap">
@@ -312,18 +389,49 @@ export function Topbar({ onToggleDebug, debugOpen, onMenuClick }: TopbarProps) {
           </SelectContent>
         </Select>
 
-        <Select value={selectValue} onValueChange={handlePreset}>
-          <SelectTrigger className="w-[130px] bg-background border-border text-xs h-9">
-            <SelectValue placeholder="Range" />
-          </SelectTrigger>
-          <SelectContent>
-            {ALL_ITEMS.map((label) => (
-              <SelectItem key={label} value={label}>
-                {label}
-              </SelectItem>
+        {/* Mobile date preset popover */}
+        <Popover open={presetOpen} onOpenChange={setPresetOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1 bg-background border-border text-xs font-normal px-2 w-[130px] flex-shrink-0"
+            >
+              <CalendarIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <span className="truncate">{preset === "Custom" ? "Custom" : preset}</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0 ml-auto" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-48 p-1 bg-card border-border">
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => handlePreset(p.label)}
+                className={cn(
+                  "w-full text-left text-sm px-3 py-1.5 rounded-sm transition-colors",
+                  preset === p.label
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-foreground hover:bg-muted/50",
+                )}
+              >
+                {p.label}
+              </button>
             ))}
-          </SelectContent>
-        </Select>
+            <div className="my-1 border-t border-border" />
+            <button
+              onClick={() => { setPresetOpen(false); openCustomDialog(); }}
+              className={cn(
+                "w-full text-left text-sm px-3 py-1.5 rounded-sm transition-colors flex items-center gap-2",
+                preset === "Custom"
+                  ? "bg-primary/10 text-primary font-medium"
+                  : "text-foreground hover:bg-muted/50",
+              )}
+            >
+              <Pencil className="h-3 w-3" />
+              Custom range...
+            </button>
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );
