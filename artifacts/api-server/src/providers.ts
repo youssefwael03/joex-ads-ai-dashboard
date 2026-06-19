@@ -1,7 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-
 export type ProviderName =
-  | "claude"
   | "groq"
   | "mistral"
   | "cloudflare"
