@@ -2048,7 +2048,7 @@ BRAIN UPDATE RULE: When user says حدث عقلك or any brain update request:
       for (const toolCall of aiResult.toolCalls) {
         const toolName = toolCall.function.name;
         let toolInput: Record<string, any> = {};
-        try { toolInput = JSON.parse(toolCall.function.arguments || "{}"); } catch {}
+        try { toolInput = JSON.parse(toolCall.function.arguments || "{}") ?? {}; } catch {}
 
         const isAction = ACTION_TOOLS.has(toolName);
         emit({ type: "tool_call", tool: toolName, label: toolCallLabel(toolName, toolInput), isAction, input: toolInput });
