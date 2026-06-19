@@ -1,0 +1,58 @@
+~/workspace$ ^C
+~/workspace$ git push --force origin main
+Enumerating objects: 120, done.
+Counting objects: 100% (120/120), done.
+Delta compression using up to 4 threads
+Compressing objects: 100% (92/92), done.
+Writing objects: 100% (92/92), 29.86 KiB | 4.98 MiB/s, done.
+Total 92 (delta 71), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (71/71), completed with 22 local objects.
+remote: error: GH013: Repository rule violations found for refs/heads/main.
+remote: 
+remote: - GITHUB PUSH PROTECTION
+remote:   —————————————————————————————————————————
+remote:     Resolve the following violations before pushing again
+remote: 
+remote:     - Push cannot contain secrets
+remote: 
+remote:     
+remote:      (?) Learn how to resolve a blocked push
+remote:      https://docs.github.com/code-security/secret-scanning/working-with-secret-scanning-and-push-protection/working-with-push-protection-from-the-command-line#resolving-a-blocked-push
+remote:     
+remote:     
+remote:       —— OpenRouter API Key ————————————————————————————————
+remote:        locations:
+remote:          - commit: 9e57383fc4e85a619ca9bd4e9c7ef8b56175d651
+remote:            path: .replit:89
+remote:     
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.
+remote:        https://github.com/youssefwael03/joex-ads-ai-dashboard/security/secret-scanning/unblock-secret/3FKkkx7HWkXheS5E5mcEi0zbtKR
+remote:     
+remote:     
+remote:       —— Groq API Key ——————————————————————————————————————
+remote:        locations:
+remote:          - commit: 21e284f609b25263af4f63a0068064dfbdac886d
+remote:            path: .replit:90
+remote:          - commit: 9e57383fc4e85a619ca9bd4e9c7ef8b56175d651
+remote:            path: .replit:90
+remote:     
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.
+remote:        https://github.com/youssefwael03/joex-ads-ai-dashboard/security/secret-scanning/unblock-secret/3FKkkrz8THRXeTACywEQDAgzUPU
+remote:     
+remote:     
+remote:       —— Cloudflare Account API Token ——————————————————————
+remote:        locations:
+remote:          - commit: 21e284f609b25263af4f63a0068064dfbdac886d
+remote:            path: .replit:92
+remote:          - commit: 9e57383fc4e85a619ca9bd4e9c7ef8b56175d651
+remote:            path: .replit:92
+remote:     
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.
+remote:        https://github.com/youssefwael03/joex-ads-ai-dashboard/security/secret-scanning/unblock-secret/3FKkkvCpMeAKiOgJ5qtYp5TOmjh
+remote:     
+remote: 
+remote: 
+To https://github.com/youssefwael03/joex-ads-ai-dashboard
+ ! [remote rejected] main -> main (push declined due to repository rule violations)
+error: failed to push some refs to 'https://github.com/youssefwael03/joex-ads-ai-dashboard'
+~/workspace$ 
