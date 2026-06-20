@@ -1,0 +1,722 @@
+You have full access to this Replit project.
+
+This is a complete rebuild of the AI Assistant system and PDF reports.
+Work through each phase fully before moving to the next.
+Show before/after code for every significant change.
+Run typecheck after each phase and fix all errors before continuing.
+
+═══════════════════════════════════════════════════════
+PHASE 1 — NEW FILE STRUCTURE
+═══════════════════════════════════════════════════════
+Create this clean modular structure:
+
+artifacts/api-server/src/ai/
+├── index.ts
+├── providers.ts
+├── chains.ts
+├── mode.ts
+├── prompt.ts
+├── tools/
+│   ├── index.ts
+│   ├── schemas.ts
+│   ├── executor.ts
+│   ├── meta.ts
+│   └── brain.ts
+└── utils.ts
+
+Migrate all logic from old ai.ts into correct files.
+Delete old ai.ts after migration is complete.
+
+═══════════════════════════════════════════════════════
+PHASE 2 — PROVIDERS (providers.ts)
+═══════════════════════════════════════════════════════
+Build clean provider system with 6 providers.
+All use OpenAI-compatible format.
+
+1. GROQ
+   Model: llama3-groq-70b-8192-tool-use-preview
+   Fallback: llama-3.3-70b-versatile
+   Base URL: https://api.groq.com/openai/v1
+   Key: GROQ_API_KEY
+   Limits: 30 RPM, 12K TPM
+
+2. GEMINI
+   Model: gemini-2.0-flash
+   Base URL: https://generativelanguage.googleapis.com/v1beta/openai/
+   Key: GEMINI_API_KEY
+   Limits: 15 RPM, 1M TPM
+   Max tokens: 4000
+
+3. DEEPSEEK
+   Model: deepseek/deepseek-chat
+   Base URL: https://openrouter.ai/api/v1
+   Key: OPENROUTER_API_KEY
+   Max tokens: 4000
+
+4. CEREBRAS
+   Model: llama-3.3-70b
+   Base URL: https://api.cerebras.ai/v1
+   Key: CEREBRAS_API_KEY
+   Max tokens: 4000
+
+5. MISTRAL
+   Model: mistral-small-latest
+   Base URL: https://api.mistral.ai/v1
+   Key: MISTRAL_API_KEY
+   Max tokens: 4000
+
+6. OPENROUTER FREE
+   Model: openrouter/auto
+   Base URL: https://openrouter.ai/api/v1
+   Key: OPENROUTER_API_KEY
+   Last resort fallback only
+
+Rules for ALL providers:
+- Track daily token usage in memory
+- On 429 → immediately skip to next provider
+- On any error → log "Provider X failed: [reason]" try next
+- Never surface provider errors to user
+- Always try next provider before giving up
+
+═══════════════════════════════════════════════════════
+PHASE 3 — CHAINS (chains.ts)
+═══════════════════════════════════════════════════════
+ANALYZE_CHAIN:
+[groq, gemini, deepseek, cerebras, mistral, openrouter]
+
+EXECUTE_CHAIN:
+[groq, gemini, deepseek, cerebras, mistral]
+
+PLAN_CHAIN:
+[deepseek, gemini, groq, cerebras, mistral, openrouter]
+
+CHAT_CHAIN:
+[cerebras, groq, mistral, gemini, openrouter]
+
+Log at start of every request:
+"[REQUEST] Mode: {mode} | Chain: {p1} → {p2} → ..."
+
+═══════════════════════════════════════════════════════
+PHASE 4 — MODE DETECTION (mode.ts)
+═══════════════════════════════════════════════════════
+ANALYZE triggers:
+EN: analyze, audit, check, review, roas, breakdown,
+    performance, report, how is, what is, show me,
+    compare, trend, insights, last, days, week, month
+AR: حلل, تحليل, راجع, كيف, أداء, تقرير, فين, إيه,
+    قارن, اعرضلي, وضع, نتايج, آخر, يوم, أسبوع
+
+EXECUTE triggers:
+EN: pause, enable, create, scale, change, update,
+    set budget, turn off, turn on, duplicate, delete
+AR: وقف, شغل, اعمل, سكيل, غير, عدل, حذف, انشئ,
+    نفذ, اوقف, فعل, زود, قلل
+
+PLAN triggers:
+EN: strategy, plan, recommend, next steps, roadmap,
+    what should, suggest, advise, how to improve
+AR: خطة, استراتيجية, توصية, إيه اللي, ايه رأيك,
+    هنعمل, نخطط, اقتراح, كيف نحسن
+
+CHAT: everything else (default)
+
+═══════════════════════════════════════════════════════
+PHASE 5 — SYSTEM PROMPT (prompt.ts)
+═══════════════════════════════════════════════════════
+All UI labels, headers, buttons, placeholders, 
+and system text must be in ENGLISH.
+The AI responds in the same language the user writes in
+(Arabic input → Arabic response, English input → English response)
+but the interface itself is always English.
+
+export function buildSystemPrompt(account, brain, mode) {
+  return `
+You are JOEX — an elite Meta Ads operator and strategic
+media buyer with full live access to the Meta Marketing API.
+
+ACCOUNT: ${account.name} | ${account.id} | ${account.currency}
+PERIOD: ${account.since} → ${account.until}
+MODE: ${mode}
+
+ACCOUNT BRAIN:
+${brain || "No brain data yet — fetch fresh data first."}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABSOLUTE RULES — NEVER BREAK THESE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. NEVER invent, estimate, or hallucinate any metric,
+   campaign name, ID, or number.
+   If you need data → call a tool to get it.
+   If tool fails → say exactly:
+   "Data fetch failed — I cannot analyze without real data."
+   Then stop. Do not continue with invented numbers.
+
+2. NEVER execute any action without explicit user approval:
+   - Pause / enable / delete any campaign, ad set, or ad
+   - Change any budget
+   - Create any campaign, ad set, or ad
+   - Modify any targeting or creative
+
+   APPROVAL PROTOCOL:
+   Step 1: Analyze with real data
+   Step 2: State exactly what you recommend + why
+   Step 3: Show expected impact in numbers
+   Step 4: Ask for confirmation
+          If user wrote in Arabic → "هل تريد مني تنفيذ هذا؟"
+          If user wrote in English → "Should I execute this?"
+   Step 5: Wait for: yes / اتفضل / نفذ / confirm
+   Step 6: Execute only what was approved
+   Step 7: Report exactly what was done
+
+3. Paused campaigns with 0 spend:
+   NEVER call them a loss.
+   Say: "This campaign has no spend data — 
+   would you like to review it?"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THINKING PROCESS (always in this order)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. FETCH   → Pull real data first
+2. DIAGNOSE → What do the numbers say?
+3. ROOT CAUSE → Why is this happening?
+4. RECOMMEND → Single best action
+5. QUANTIFY → Expected impact in numbers
+6. CONFIRM → Get approval before execution
+7. EXECUTE → Only what was approved
+8. REPORT → Confirm result
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PROACTIVE FLAGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+After every analysis, flag immediately:
+🚨 ROAS dropped >20% vs last week
+🚨 Frequency >3.5x on any active ad set
+🚨 CPP increased >25% vs last week
+🚨 High-ROAS campaign (>5x) is PAUSED
+🚨 Ad set in Learning Phase >7 days
+🚨 Budget running out before 6pm
+
+END EVERY ANALYSIS WITH:
+🚨 URGENT: [action needed today or "None"]
+⚡ OPPORTUNITY: [best quick win right now]
+📊 WATCH: [metrics trending wrong]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMMUNICATION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Match user language exactly:
+  Arabic message → full Arabic response
+  English message → full English response
+- Lead with the most important finding
+- Use tables for any comparison of 3+ items
+- Always use real numbers
+- Max 3 recommendations per response, prioritized
+- Be direct, not vague
+- Never say "Let me fetch" — just fetch and report
+- Never say "I can help" — just do it
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXECUTION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Always reference real campaign names and IDs
+- Never create targeting without showing user first
+- Budget scaling: never suggest more than 20% increase
+- After any execution → call save_account_brain
+- If tool fails → report exact error, never hide it
+  `.trim();
+}
+
+═══════════════════════════════════════════════════════
+PHASE 6 — CAMPAIGN CREATION FIX (meta.ts)
+═══════════════════════════════════════════════════════
+Campaign payload:
+{
+  name: string,
+  objective: "OUTCOME_SALES",
+  status: "PAUSED",
+  special_ad_categories: [],
+  buying_type: "AUCTION"
+}
+
+Ad Set payload:
+{
+  name: string,
+  campaign_id: string,
+  daily_budget: number (EGP × 100),
+  billing_event: "IMPRESSIONS",
+  optimization_goal: "OFFSITE_CONVERSIONS",
+  bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+  targeting: {
+    geo_locations: { countries: ["EG"] },
+    age_min: 18,
+    age_max: 65
+  },
+  status: "PAUSED",
+  promoted_object: {
+    pixel_id: AUTO_FETCHED,
+    custom_event_type: "PURCHASE"
+  }
+}
+
+Pre-flight validation before every Meta write call:
+- All required fields present
+- Budget converted to cents (EGP × 100)
+- Valid objective value
+- Valid geo format
+- Pixel ID available (auto-fetch if missing)
+
+On Meta API error → show user:
+"Meta API rejected this: [exact error_user_msg]"
+Never retry silently.
+
+Auto-fetch pixel ID before any ad set creation.
+Store in account brain after first fetch.
+
+═══════════════════════════════════════════════════════
+PHASE 7 — CHAT UI REBUILD (AIAssistant.tsx)
+═══════════════════════════════════════════════════════
+ALL UI TEXT IN ENGLISH:
+- Tab labels: "AI Assistant" not "المساعد"
+- Buttons: "Send", "Clear", "New Chat"
+- Status labels: "Analyzing...", "Executing...", "Thinking..."
+- Tool call labels in English:
+  "Fetching account data..."
+  "Loading campaigns..."
+  "Saving account brain..."
+  "Executing change..."
+- Footer: "Provider: {name} · {tokens} tokens · {time}s"
+- Placeholder: "Ask in Arabic or English..."
+- Mode indicator: "Mode: Analyze | Chain: groq → gemini"
+
+1. INSTALL
+npm install react-markdown remark-gfm
+
+Add to index.html:
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+2. AUTO RTL/LTR DETECTION
+function detectDirection(text: string): "rtl" | "ltr" {
+  const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
+  const totalChars = text.replace(/\s/g, "").length;
+  return totalChars > 0 && arabicChars / totalChars > 0.3
+    ? "rtl" : "ltr";
+}
+
+Apply to every message bubble:
+- Arabic content → dir="rtl", text-align right, Cairo font
+- English content → dir="ltr", text-align left, Inter font
+- Tables inside Arabic messages → always stay LTR
+
+3. MARKDOWN RENDERING
+<div dir={detectDirection(content)}>
+  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+    {content}
+  </ReactMarkdown>
+</div>
+
+Markdown styles (dark theme):
+
+Tables:
+  width: 100%
+  border-collapse: collapse
+  th: background #0a0f1e, color #f0b429, padding 10px, 
+      font-size 12px, text-align left
+  td: padding 8px 10px, 
+      border-bottom: 1px solid rgba(255,255,255,0.06)
+      font-size 13px
+  tr:nth-child(even): background rgba(255,255,255,0.02)
+  tr:hover: background rgba(240,180,41,0.05)
+
+h1: font-size 18px, color #f0b429, margin 16px 0 8px
+h2: font-size 15px, color #f0b429, margin 14px 0 6px
+h3: font-size 13px, color #f0b429, margin 12px 0 4px
+
+Bold: color white, font-weight 600
+
+Lists:
+  padding-left 20px (LTR) / padding-right 20px (RTL)
+  li: margin 4px 0, font-size 13px
+  
+Code:
+  background rgba(0,0,0,0.4)
+  border-left: 3px solid #f0b429
+  padding: 12px 16px
+  font-family: monospace
+  font-size: 12px
+  border-radius: 6px
+
+hr: border-color rgba(240,180,41,0.3), margin 12px 0
+
+4. MESSAGE BUBBLE DESIGN
+
+AI Message:
+  background: rgba(10, 15, 30, 0.6)
+  border: 1px solid rgba(240, 180, 41, 0.15)
+  border-left: 3px solid #f0b429
+  border-radius: 0 12px 12px 12px
+  padding: 16px 20px
+  width: 100%
+  font-family: based on direction
+
+User Message:
+  background: rgba(240, 180, 41, 0.08)
+  border: 1px solid rgba(240, 180, 41, 0.2)
+  border-radius: 12px 0 12px 12px
+  padding: 12px 16px
+  max-width: 80%
+  align-self: flex-end
+
+Message footer (below each AI message):
+  font-size: 11px
+  color: rgba(255,255,255,0.3)
+  margin-top: 8px
+  format: "Provider: {name} · {tokens} tokens · {time}s"
+
+5. TOOL CALL STATUS
+
+Pending state:
+  background: rgba(240, 180, 41, 0.04)
+  border: 1px solid rgba(240, 180, 41, 0.1)
+  border-radius: 8px
+  padding: 8px 14px
+  display: flex, align-items center, gap 8px
+  Show: animated spinner + English label
+
+Labels:
+  get_account_overview → "📊 Fetching account overview..."
+  get_campaigns → "📋 Loading campaigns..."
+  get_adsets → "🎯 Loading ad sets..."
+  pause_campaign → "⏸ Pausing campaign..."
+  create_campaign → "🔨 Creating campaign..."
+  save_account_brain → "🧠 Saving account intelligence..."
+  set_campaign_budget → "💰 Updating budget..."
+
+Completed state:
+  opacity: 0.5
+  Show: "✓ {label} — {summary of result}"
+
+6. URGENT FLAG BLOCKS
+Detect lines starting with 🚨, ⚡, 📊 and style:
+
+🚨 block:
+  background: rgba(220, 38, 38, 0.08)
+  border-left: 3px solid #dc2626
+  border-radius: 0 8px 8px 0
+  padding: 10px 14px
+  margin: 6px 0
+
+⚡ block:
+  background: rgba(240, 180, 41, 0.08)
+  border-left: 3px solid #f0b429
+  border-radius: 0 8px 8px 0
+  padding: 10px 14px
+  margin: 6px 0
+
+📊 block:
+  background: rgba(59, 130, 246, 0.08)
+  border-left: 3px solid #3b82f6
+  border-radius: 0 8px 8px 0
+  padding: 10px 14px
+  margin: 6px 0
+
+7. INPUT AREA
+All labels in English.
+
+Auto-detect typing direction:
+- First character typed decides direction
+- Arabic → dir=rtl, text-align right
+- English → dir=ltr, text-align left
+- Reset on clear
+
+Input styling:
+  background: rgba(10, 15, 30, 0.9)
+  border: 1px solid rgba(240, 180, 41, 0.25)
+  border-radius: 12px
+  padding: 12px 16px
+  font-family: Cairo, Inter, sans-serif
+  font-size: 14px
+  focus: border-color #f0b429, box-shadow 0 0 0 2px rgba(240,180,41,0.1)
+  placeholder: "Ask in Arabic or English..."
+
+Send button:
+  background: #f0b429
+  color: #0a0f1e
+  font-weight: 600
+  border-radius: 8px
+  padding: 8px 16px
+  label: "Send"
+  hover: background #d4a017
+
+Mode indicator bar above input:
+  font-size: 11px
+  color: rgba(255,255,255,0.4)
+  "Mode: {Analyze|Execute|Plan|Chat} · {provider chain}"
+
+═══════════════════════════════════════════════════════
+PHASE 8 — PDF REPORT COMPLETE REBUILD
+═══════════════════════════════════════════════════════
+ALL PDF TEXT IN ENGLISH except account name 
+(which must render in Arabic correctly).
+
+ARABIC FONT FIX (CRITICAL):
+1. Fetch Noto Sans Arabic at generation time:
+   const fontUrl = "https://fonts.gstatic.com/s/notosansarabic/v18/nwpxtLGrOAZMl5nJ_wfgRg3DrWFZWsnVBJ_sS6tlqHHFlhQ5l3sQWIHPqzCfyGyvu3CBFQLaig.woff2"
+   const fontBuffer = await fetch(fontUrl).then(r => r.arrayBuffer());
+   const fontBase64 = btoa(
+     Array.from(new Uint8Array(fontBuffer))
+       .map(b => String.fromCharCode(b)).join("")
+   );
+   doc.addFileToVFS("NotoSansArabic.ttf", fontBase64);
+   doc.addFont("NotoSansArabic.ttf", "NotoSansArabic", "normal");
+
+2. Helper function — use before EVERY text call:
+   function setFont(doc, text, size = 10) {
+     const hasArabic = /[\u0600-\u06FF]/.test(text);
+     doc.setFont(hasArabic ? "NotoSansArabic" : "helvetica", "normal");
+     doc.setFontSize(size);
+   }
+
+3. If font still broken → fallback to canvas:
+   Render Arabic text on off-screen canvas,
+   capture as PNG, embed image in PDF.
+   Never show garbage characters.
+
+COLORS:
+  NAVY = [10, 15, 30]
+  GOLD = [240, 180, 41]
+  WHITE = [255, 255, 255]
+  GRAY = [136, 146, 164]
+  LIGHT = [248, 249, 250]
+  GREEN = [22, 163, 74]
+  RED = [220, 38, 38]
+
+PAGE 1 — COVER:
+  Full navy background (fillRect entire page)
+  
+  Logo area (top 40mm, centered):
+    "JOEX ADS" — white, 32pt, bold, centered
+    gold underline bar (2mm height, 60mm wide, centered)
+  
+  Subtitle (50mm):
+    "Performance Marketing Report"
+    white, 14pt, centered
+  
+  Gold divider line at 70mm (full width, 0.5mm, gold)
+  
+  Account info block (centered, 90-130mm):
+    Account name in Arabic (NotoSansArabic, 20pt, gold, centered)
+    gap 8mm
+    "Period:" label (gray, 10pt) + date range (white, 10pt)
+    "Currency:" label (gray, 10pt) + "EGP" (white, 10pt)
+    "Generated:" label (gray, 10pt) + date (white, 10pt)
+    Each row centered, 8mm apart
+  
+  Date format: "01 Jan 2026 → 20 Jun 2026"
+  NOT ">-" or "!'"  — use "→" arrow always
+  
+  Bottom (260mm):
+    thin gold line
+    "Powered by JOEX Dashboard" — gray, 8pt, centered
+
+PAGE 2 — KPI SUMMARY:
+  Header bar (full width, 18mm height, navy):
+    Left: "Account Performance Summary" — gold, 11pt, bold
+    Right: date range — gray, 9pt
+  
+  16 KPI Cards in 4×4 grid:
+    Card dimensions: (pageWidth - margins) / 4 wide, 22mm tall
+    Card style:
+      background: LIGHT
+      top border: 2mm gold
+      border-radius: 3mm
+      label: gray, 8pt, centered, top of card
+      value: navy, 13pt, bold, centered, bottom of card
+    
+    Row 1: Total Spend | Revenue | ROAS | Purchases
+    Row 2: CTR | CPM | CPC | CPA  
+    Row 3: Frequency | Reach | Impressions | Leads
+    Row 4: Active Campaigns | Paused | Total | Active Ad Sets
+    
+    Special formatting:
+      ROAS: show as "6.40x"
+      Spend/Revenue: "EGP 229,041"
+      CTR: "3.74%"
+      Frequency: if >3.5 → show in RED
+
+PAGE 3 — CHARTS:
+  Header bar: "Performance Analytics" — same style as page 2
+
+  Method: render charts as hidden HTML, capture with html2canvas,
+  embed as images in PDF.
+
+  Create hidden container when PDF button clicked:
+  <div id="pdf-chart-container" style="
+    position: fixed; left: -9999px; top: 0;
+    width: 680px; background: white; padding: 20px;
+  ">
+
+  Chart 1 — ROAS Trend Line (top half, height 280px):
+    recharts LineChart
+    Data: daily insights last 30 days
+    X-axis: date labels (short format "Jun 15")
+    Y-axis: ROAS value
+    Line: color #f0b429, strokeWidth 2, dot on hover
+    Grid: light gray horizontal lines
+    Title above chart: "ROAS Trend — Last 30 Days" (navy, 13px bold)
+    Background: white
+
+  Chart 2 — Top 5 Campaigns Bar (bottom half, height 280px):
+    recharts BarChart (horizontal)
+    Data: top 5 campaigns by spend (spend > 0 only)
+    Bars: Spend (navy #0a0f1e) and Revenue (gold #f0b429)
+    Legend: "Spend" and "Revenue"
+    Title: "Top Campaigns Performance" (navy, 13px bold)
+    Y-axis: campaign names (truncate at 20 chars)
+
+  Capture each chart:
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#fff' });
+    const img = canvas.toDataURL('image/png');
+    doc.addImage(img, 'PNG', margin, y, contentWidth, chartHeight);
+
+  Remove container after capture.
+
+PAGE 4 — CAMPAIGNS TABLE:
+  Header bar: "Active Campaigns" — same style
+
+  Table columns:
+    Campaign Name | Status | Spend | ROAS | CTR | Purchases | Daily Budget
+  
+  Column headers:
+    background: NAVY
+    text: GOLD
+    font: 9pt bold
+    padding: 3mm
+  
+  Filter: ONLY campaigns where spend > 0
+  Sort: by spend descending
+  
+  Row styling:
+    height: 8mm
+    even rows: LIGHT background
+    odd rows: WHITE background
+    text: NAVY 8pt
+    
+    ROAS coloring:
+      > 6x → green text
+      4-6x → navy text (normal)
+      < 4x → red text
+    
+    Status badges:
+      ACTIVE → small green dot + "Active"
+      PAUSED → small gray dot + "Paused"
+  
+  Footer row (light gold background):
+    "X additional paused campaigns with $0 spend not shown"
+    gray italic 8pt, right-aligned
+
+PAGE FOOTER (all pages except cover):
+  Thin gold line at 272mm
+  Left: "JOEX Ads Dashboard" — gray, 8pt
+  Center: account name (Arabic font if Arabic) — gray, 8pt
+  Right: "Page X of Y" — gray, 8pt
+
+PAGE NUMBERS:
+  Track total pages
+  Update footer on every page with correct "Page X of Y"
+
+═══════════════════════════════════════════════════════
+PHASE 9 — GENERAL CLEANUP
+═══════════════════════════════════════════════════════
+1. Remove ALL dead code:
+   - "claude" from any provider list
+   - Commented blocks over 10 lines
+   - Unused imports across all files
+   - Dead modeInstruction variable
+
+2. Fix duplicate port 8080 workflow:
+   Identify and permanently remove the duplicate.
+   Only one server on startup.
+
+3. Error boundaries for silent-fail features:
+   Instagram tab:
+     If page token fails → show:
+     "Instagram Business Account not connected.
+     Go to Facebook Page Settings to link your Instagram."
+     Add connection status bar at top.
+     Remove follower_count with period(day) from API call.
+   
+   Leads tab:
+     If no lead gen campaigns → show:
+     "No lead generation campaigns found in this account."
+   
+   Catalog tab:
+     If no catalog → show:
+     "No product catalog found. Connect your catalog in
+     Meta Commerce Manager."
+   
+   Never show blank page. Always show actionable message.
+
+4. Change ALL remaining Arabic UI labels to English:
+   - Navigation tabs
+   - Button labels
+   - Status messages
+   - Loading states
+   - Error messages
+   - Placeholder text
+   Keep only: account names and AI chat responses in Arabic
+
+═══════════════════════════════════════════════════════
+PHASE 10 — FINAL VERIFICATION
+═══════════════════════════════════════════════════════
+After all phases:
+
+1. Run typecheck — fix ALL errors
+2. Restart frontend and backend
+3. Confirm no port conflicts in logs
+
+4. Test A — Arabic analysis:
+   Send: "حلل الأكاونت آخر 30 يوم"
+   Expected:
+   ✓ Real Meta data (real campaign names)
+   ✓ Arabic response, RTL layout
+   ✓ Tables render with dark styling
+   ✓ Ends with 🚨⚡📊 colored blocks
+   ✓ Log: "Mode: analyze | Chain: groq → ..."
+   ✓ UI labels all in English
+
+5. Test B — Approval gate:
+   Send: "pause all low ROAS campaigns"
+   Expected:
+   ✓ Fetches real data first
+   ✓ Shows which campaigns + why
+   ✓ Asks "Should I execute this?"
+   ✓ Does NOT execute without confirmation
+
+6. Test C — Campaign creation:
+   Send: "create a campaign called Broad Test 
+          with 500 EGP daily budget targeting Egypt"
+   Expected:
+   ✓ Shows plan and asks approval first
+   ✓ After approval: correct Meta API payload
+   ✓ No "Invalid parameter" error
+
+7. Test D — PDF:
+   Generate PDF report
+   Expected:
+   ✓ Account name in Arabic renders correctly
+   ✓ All other text in English
+   ✓ 2 charts visible on page 3
+   ✓ Only campaigns with spend > 0 in table
+   ✓ Professional dark navy + gold design
+   ✓ Date format uses "→" not ">-" or "!'"
+   ✓ Page numbers correct on every page
+
+8. Take screenshot of:
+   - Chat UI with a response
+   - PDF first page
+   - PDF charts page
+
+9. Final summary table:
+   | Component       | Before | After | Status |
+   |-----------------|--------|-------|--------|
+   List every file changed and what was fixed.

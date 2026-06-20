@@ -4,3 +4,5 @@
 - [Instagram follower_count period bug](instagram-insights-period.md) — follower_count metric requires period=lifetime, not period=day; causes empty insights; use impressions/reach/profile_views for day period.
 - [PDF Arabic font fix](pdf-arabic-font.md) — Amiri font must be SET (doc.setFont) after loading, not just registered; use Array.from().join() not string-concat loop for btoa performance.
 - [Port 8080 duplicate workflow](port-conflict.md) — "API Server" workflow conflicts with "artifacts/api-server: API Server"; only the latter should run; never restart "API Server".
+- [AI modular structure](ai-module-structure.md) — ai/ directory splits the 2157-line routes/ai.ts into brain.ts, utils.ts, mode.ts, prompt.ts, labels.ts, tools/schemas.ts, tools/executor.ts; routes/ai.ts is now ~160 lines.
+- [Provider chains by mode](provider-chains.md) — 6 providers (groq,gemini,deepseek,cerebras,mistral,openrouter_free); Cloudflare removed; mode-specific chains: execute→groq-first, analyze→gemini-first, plan→deepseek-first, chat→cerebras-first.

@@ -1,0 +1,505 @@
+You have full access to this Replit project.
+
+This is a complete rebuild of the AI Assistant system.
+Work through each phase fully before moving to the next.
+Show before/after code for every significant change.
+
+═══════════════════════════════════════════════════════
+PHASE 1 — NEW FILE STRUCTURE
+═══════════════════════════════════════════════════════
+Create this clean modular structure:
+
+artifacts/api-server/src/ai/
+├── index.ts          ← SSE route handler (main entry)
+├── providers.ts      ← provider configs + waterfall logic
+├── chains.ts         ← ANALYZE/EXECUTE/PLAN/CHAT chains
+├── mode.ts           ← mode detection from user message
+├── prompt.ts         ← system prompt builder
+├── tools/
+│   ├── index.ts      ← exports all tools
+│   ├── schemas.ts    ← all tool JSON schemas
+│   ├── executor.ts   ← executeTool switch/case
+│   ├── meta.ts       ← Meta API implementations
+│   └── brain.ts      ← save/load account brain
+└── utils.ts          ← shared helpers
+
+Migrate all logic from the old ai.ts into these files.
+Delete old ai.ts after migration is complete.
+Fix all TypeScript errors before proceeding.
+
+═══════════════════════════════════════════════════════
+PHASE 2 — PROVIDERS (providers.ts)
+═══════════════════════════════════════════════════════
+Build a clean provider system with 6 providers.
+All use OpenAI-compatible format:
+
+1. GROQ
+   Model: llama3-groq-70b-8192-tool-use-preview
+   Fallback model: llama-3.3-70b-versatile
+   Base URL: https://api.groq.com/openai/v1
+   Key: GROQ_API_KEY
+   Limits: 30 RPM, 12K TPM, 1000 req/day
+
+2. GEMINI
+   Model: gemini-2.0-flash
+   Base URL: https://generativelanguage.googleapis.com/v1beta/openai/
+   Key: GEMINI_API_KEY
+   Limits: 15 RPM, 1M TPM
+   Max tokens: 4000
+
+3. DEEPSEEK (via OpenRouter)
+   Model: deepseek/deepseek-chat
+   Base URL: https://openrouter.ai/api/v1
+   Key: OPENROUTER_API_KEY
+   Max tokens: 4000
+
+4. CEREBRAS
+   Model: llama-3.3-70b
+   Base URL: https://api.cerebras.ai/v1
+   Key: CEREBRAS_API_KEY
+   Max tokens: 4000
+
+5. MISTRAL
+   Model: mistral-small-latest
+   Base URL: https://api.mistral.ai/v1
+   Key: MISTRAL_API_KEY
+   Max tokens: 4000
+
+6. OPENROUTER FREE
+   Model: openrouter/auto
+   Base URL: https://openrouter.ai/api/v1
+   Key: OPENROUTER_API_KEY
+   Last resort fallback only
+
+Rules for all providers:
+- Track token usage in memory per provider per day
+- On 429 rate limit → immediately skip to next provider
+- On any error → log "Provider X failed: [reason]" 
+  then try next
+- Never surface provider errors to user
+- Always try next provider before giving up
+
+═══════════════════════════════════════════════════════
+PHASE 3 — CHAINS (chains.ts)
+═══════════════════════════════════════════════════════
+Define 4 chains:
+
+ANALYZE_CHAIN:
+[groq, gemini, deepseek, cerebras, mistral, openrouter]
+Purpose: real data analysis — needs best tool calling
+
+EXECUTE_CHAIN:
+[groq, gemini, deepseek, cerebras, mistral]
+Purpose: writing to Meta API — must be most accurate
+
+PLAN_CHAIN:
+[deepseek, gemini, groq, cerebras, mistral, openrouter]
+Purpose: strategy + reasoning — needs deep thinking
+
+CHAT_CHAIN:
+[cerebras, groq, mistral, gemini, openrouter]
+Purpose: conversation — speed is priority
+
+Log at start of every request:
+"[REQUEST] Mode: {mode} | Chain: {provider1} → {provider2} → ..."
+
+═══════════════════════════════════════════════════════
+PHASE 4 — MODE DETECTION (mode.ts)
+═══════════════════════════════════════════════════════
+Detect mode from user message:
+
+ANALYZE keywords:
+EN: analyze, audit, check, review, roas, breakdown,
+    performance, report, how is, what is, show me,
+    compare, trend, insights
+AR: حلل, تحليل, راجع, كيف, أداء, تقرير, فين, إيه,
+    قارن, اعرضلي, وضع, نتايج
+
+EXECUTE keywords:
+EN: pause, enable, create, scale, change, update,
+    set budget, turn off, turn on, duplicate, delete
+AR: وقف, شغل, اعمل, سكيل, غير, عدل, حذف, انشئ,
+    نفذ, اوقف, فعل, زود, قلل, عدل
+
+PLAN keywords:
+EN: strategy, plan, recommend, next steps, roadmap,
+    what should, suggest, advise, how to improve
+AR: خطة, استراتيجية, توصية, إيه اللي, ايه رأيك,
+    هنعمل, نخطط, اقتراح, كيف نحسن
+
+CHAT: everything else (default)
+
+═══════════════════════════════════════════════════════
+PHASE 5 — SYSTEM PROMPT (prompt.ts)
+═══════════════════════════════════════════════════════
+Build system prompt dynamically:
+
+export function buildSystemPrompt(account, brain, mode) {
+  return `
+You are JOEX — an elite Meta Ads operator and strategic
+media buyer with full live access to the Meta Marketing API.
+
+ACCOUNT: ${account.name} | ${account.id} | ${account.currency}
+PERIOD: ${account.since} → ${account.until}
+MODE: ${mode}
+
+ACCOUNT BRAIN:
+${brain || "No brain data yet — fetch fresh data first."}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABSOLUTE RULES — NEVER BREAK THESE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. NEVER invent, estimate, or hallucinate any metric,
+   campaign name, ID, or number.
+   If you need data → call a tool.
+   If tool fails → say:
+   "فشل جلب البيانات — لا أستطيع التحليل بدون بيانات حقيقية"
+   Then stop. Do not continue with invented numbers.
+
+2. NEVER execute any action without explicit user approval:
+   - Pause / enable / delete any campaign, ad set, or ad
+   - Change any budget (up or down)
+   - Create any campaign, ad set, ad, or audience
+   - Modify any targeting or creative
+
+   APPROVAL PROTOCOL:
+   Step 1: Analyze with real data
+   Step 2: State exactly what you recommend + why
+   Step 3: Show expected impact in numbers
+   Step 4: Ask: "هل تريد مني تنفيذ هذا؟"
+   Step 5: Wait for: yes / اتفضل / نفذ / confirm
+   Step 6: Execute only what was approved
+   Step 7: Report exactly what was done
+
+3. Paused campaigns with 0 spend:
+   NEVER call them a loss or underperforming.
+   Say: "هذه الحملة لا تحتوي على بيانات إنفاق —
+   هل تريد مراجعتها؟"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THINKING PROCESS (always in order)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. FETCH   → Pull real data first, never from memory alone
+2. DIAGNOSE → What do the numbers actually say?
+3. ROOT CAUSE → Why is this happening?
+4. RECOMMEND → Single best action right now
+5. QUANTIFY → Expected impact in real numbers
+6. CONFIRM → Get approval before any execution
+7. EXECUTE → Only exactly what was approved
+8. REPORT → Confirm what was done + show result
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PROACTIVE FLAGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+After every analysis, check and flag immediately:
+🚨 ROAS dropped >20% vs last week
+🚨 Frequency >3.5x on any active ad set
+🚨 CPP increased >25% vs last week
+🚨 High-ROAS campaign (>5x) is PAUSED
+🚨 Ad set in Learning Phase >7 days
+🚨 Daily budget will run out before 6pm
+
+END EVERY ANALYSIS WITH:
+🚨 URGENT: [what needs action today — or "لا يوجد"]
+⚡ OPPORTUNITY: [best quick win right now]
+📊 WATCH: [metrics trending in wrong direction]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMMUNICATION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Match user language exactly:
+  Arabic message → full Arabic response
+  English message → full English response
+  Mixed → match the dominant language
+- Lead with the most important finding, not process
+- Use tables for any comparison of 3 or more items
+- Always use real numbers, never vague statements
+- Maximum 3 recommendations per response, prioritized
+- Be direct: "هذا الـ Ad Set يخسر مالك"
+  NOT: "قد يكون هناك فرصة للتحسين"
+- Never say "Let me fetch" — just fetch and report
+- Never say "I can help with that" — just do it
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXECUTION RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Always reference real campaign names and IDs
+- Never create targeting specs without showing user first
+- Budget scaling: never suggest more than 20% increase
+- After any execution → call save_account_brain
+- If tool fails → report exact error, never hide it
+  `.trim();
+}
+
+═══════════════════════════════════════════════════════
+PHASE 6 — CAMPAIGN CREATION FIX (meta.ts)
+═══════════════════════════════════════════════════════
+Fix all campaign/adset creation with correct payloads:
+
+Campaign payload:
+{
+  name: string,
+  objective: "OUTCOME_SALES",
+  status: "PAUSED",
+  special_ad_categories: [],
+  buying_type: "AUCTION"
+}
+
+Ad Set payload:
+{
+  name: string,
+  campaign_id: string,
+  daily_budget: number (EGP × 100 = cents),
+  billing_event: "IMPRESSIONS",
+  optimization_goal: "OFFSITE_CONVERSIONS",
+  bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+  targeting: {
+    geo_locations: { countries: ["EG"] },
+    age_min: 18,
+    age_max: 65
+  },
+  status: "PAUSED",
+  promoted_object: {
+    pixel_id: AUTO_FETCHED,
+    custom_event_type: "PURCHASE"
+  }
+}
+
+Pre-flight validation before EVERY Meta write call:
+- All required fields present → else tell user what's missing
+- Budget in cents (EGP × 100) → validate conversion
+- Valid objective value → else show valid options
+- Valid geo format → else show correct format
+- Pixel ID available → auto-fetch if not in brain
+
+Auto-fetch pixel:
+- Before any ad set creation, call pixels endpoint
+- Store pixel_id in account brain
+- Use stored pixel_id for all future ad set creation
+
+Error handling:
+- On Meta API error → surface error_user_msg to user
+- Show exact payload that was rejected
+- Never retry silently — always tell user what failed
+
+═══════════════════════════════════════════════════════
+PHASE 7 — CHAT UI REBUILD (AIAssistant.tsx)
+═══════════════════════════════════════════════════════
+Rebuild the chat UI to be professional and bilingual.
+
+1. INSTALL DEPENDENCIES
+npm install react-markdown remark-gfm
+
+Add Arabic font to index.html:
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+
+2. AUTO RTL/LTR DETECTION
+Add this utility:
+
+function detectDirection(text: string): "rtl" | "ltr" {
+  const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
+  const totalChars = text.replace(/\s/g, "").length;
+  return totalChars > 0 && arabicChars / totalChars > 0.3 
+    ? "rtl" : "ltr";
+}
+
+Apply to every message bubble:
+- dir="rtl" or dir="ltr" based on content
+- text-align: right for RTL, left for LTR
+- Cairo font for Arabic messages
+- Tables always stay LTR inside RTL messages
+
+3. MARKDOWN RENDERING
+Replace raw text div with:
+
+<div dir={detectDirection(content)}>
+  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+    {content}
+  </ReactMarkdown>
+</div>
+
+Style markdown with dark theme:
+
+Tables:
+  width: 100%
+  border-collapse: collapse
+  th: background #0a0f1e, color #f0b429, padding 10px
+  td: padding 8px 10px, border 1px solid rgba(255,255,255,0.1)
+  tr:nth-child(even): background rgba(255,255,255,0.03)
+
+Headers (h1/h2/h3):
+  color: #f0b429
+  font-family: Cairo, sans-serif
+  margin: 12px 0 8px
+
+Bold: color white, font-weight 700
+
+Lists:
+  padding-right: 20px (RTL)
+  li: margin 4px 0
+  bullet color: #f0b429
+
+Code blocks:
+  background: rgba(0,0,0,0.4)
+  border-left: 3px solid #f0b429
+  padding: 12px
+  font-family: monospace
+
+4. MESSAGE BUBBLE DESIGN
+
+AI Message:
+  background: rgba(10, 15, 30, 0.8)
+  border: 1px solid rgba(240, 180, 41, 0.2)
+  border-left: 3px solid #f0b429
+  border-radius: 12px
+  padding: 16px 20px
+  width: 100%
+  font-family: Cairo, sans-serif
+
+User Message:
+  background: rgba(240, 180, 41, 0.1)
+  border: 1px solid rgba(240, 180, 41, 0.3)
+  border-radius: 12px
+  padding: 12px 16px
+  max-width: 85%
+  align-self: flex-end
+
+Message footer:
+  font-size: 11px
+  color: rgba(255,255,255,0.4)
+  margin-top: 8px
+  Show: [provider] · [tokens] tokens · [time]s
+
+5. TOOL CALL STATUS ROWS
+Show tool calls as clean status indicators:
+
+Pending:
+  background: rgba(240, 180, 41, 0.05)
+  border: 1px solid rgba(240, 180, 41, 0.15)
+  border-radius: 8px
+  padding: 8px 12px
+  Show: spinner + Arabic label
+
+Labels by tool type:
+  get_* tools → "📊 جاري تحميل البيانات..."
+  pause/enable → "⚡ جاري تنفيذ التغيير..."
+  create_* → "🔨 جاري الإنشاء..."
+  save_brain → "🧠 جاري حفظ معلومات الحساب..."
+
+Completed:
+  color: rgba(255,255,255,0.4)
+  Show: ✓ + completed label + data summary
+
+6. URGENT FLAGS STYLING
+Detect and style the 3 flag sections:
+
+🚨 URGENT block:
+  background: rgba(220, 38, 38, 0.08)
+  border-left: 3px solid #dc2626
+  border-radius: 8px
+  padding: 10px 14px
+  margin: 8px 0
+
+⚡ OPPORTUNITY block:
+  background: rgba(240, 180, 41, 0.08)
+  border-left: 3px solid #f0b429
+  border-radius: 8px
+  padding: 10px 14px
+  margin: 8px 0
+
+📊 WATCH block:
+  background: rgba(59, 130, 246, 0.08)
+  border-left: 3px solid #3b82f6
+  border-radius: 8px
+  padding: 10px 14px
+  margin: 8px 0
+
+Auto-detect by emoji prefix and apply styling.
+
+7. INPUT AREA
+Auto-detect typing direction:
+- Monitor first character typed
+- Arabic first → dir=rtl, text-align=right
+- English first → dir=ltr, text-align=left
+
+Input styling:
+  background: rgba(10, 15, 30, 0.9)
+  border: 1px solid rgba(240, 180, 41, 0.3)
+  border-radius: 12px
+  padding: 12px 16px
+  font-family: Cairo, sans-serif
+  focus border: #f0b429
+  placeholder: "اكتب رسالتك... (عربي أو إنجليزي)"
+
+═══════════════════════════════════════════════════════
+PHASE 8 — GENERAL CLEANUP
+═══════════════════════════════════════════════════════
+1. Remove all dead code:
+   - "claude" from any provider lists
+   - Commented blocks over 10 lines
+   - Unused imports in all files
+
+2. Fix duplicate port 8080 workflow:
+   - Identify the duplicate workflow
+   - Remove it permanently
+   - Ensure only one server runs on startup
+
+3. Add error boundaries to silent-fail features:
+   Instagram tab → show clear connection error
+   Leads tab → show clear error if page token missing
+   Catalog tab → show clear error if no catalog found
+   Never show blank page — always show actionable message
+
+4. Fix Instagram insights:
+   - Remove follower_count with period(day) from request
+   - Add connection status bar at top of tab
+   - If no Instagram Business Account → show:
+     "لم يتم ربط حساب انستجرام بيزنس — 
+     اذهب إلى إعدادات الصفحة لربط الحساب"
+
+═══════════════════════════════════════════════════════
+PHASE 9 — FINAL VERIFICATION
+═══════════════════════════════════════════════════════
+After all phases complete:
+
+1. Run typecheck — fix ALL errors before continuing
+2. Restart frontend and backend
+3. Test these 4 scenarios:
+
+TEST A — Arabic analyze:
+Send: "حلل الأكاونت آخر 30 يوم"
+Expected:
+✓ Uses real Meta data (real campaign names)
+✓ Response in Arabic, RTL direction
+✓ Tables render with dark theme styling
+✓ Ends with 🚨⚡📊 colored blocks
+✓ Log shows: "Mode: analyze | Chain: groq → ..."
+
+TEST B — Approval gate:
+Send: "وقف كل الحملات الخاسرة"
+Expected:
+✓ Fetches real data first
+✓ Shows which campaigns and why
+✓ Asks "هل تريد مني تنفيذ هذا؟"
+✓ Does NOT execute without confirmation
+
+TEST C — Campaign creation:
+Send: "اعمل كامبين اسمها Broad Test ببدجت 500 جنيه على مصر"
+Expected:
+✓ Shows plan first and asks approval
+✓ After approval: creates with correct payload
+✓ No "Invalid parameter" error from Meta
+
+TEST D — English analyze:
+Send: "show me performance last 7 days"
+Expected:
+✓ Response in English, LTR direction
+✓ Real data, real campaign names
+✓ Tables formatted correctly
+
+4. Take a screenshot of the chat UI
+
+5. Final summary table:
+| Component | Before | After | Status |
+|-----------|--------|-------|--------|
+List every file changed and what was fixed.

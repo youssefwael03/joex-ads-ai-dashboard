@@ -1,8 +1,9 @@
 export type ProviderName =
   | "groq"
-  | "mistral"
-  | "cloudflare"
+  | "gemini"
   | "deepseek"
+  | "cerebras"
+  | "mistral"
   | "openrouter_free";
 
 export interface AIMessage {
@@ -21,45 +22,77 @@ export interface AIResponse {
   finishReason?: string;
 }
 
-// Fixed provider chain — tried in order, auto-fallback on error
-const PROVIDER_CHAIN: ProviderName[] = [
+// ── Mode-specific provider chains ─────────────────────────────────────────────
+// Each chain is tried in order; first provider to succeed wins.
+
+// Execute mode: Groq first for speed (tool-use model), then others
+const EXECUTE_CHAIN: ProviderName[] = [
   "groq",
-  "mistral",
-  "cloudflare",
+  "gemini",
   "deepseek",
+  "cerebras",
+  "mistral",
   "openrouter_free",
 ];
 
-// Analyze mode skips Groq — Groq hallucinates data when it has no real tool results
+// Analyze mode: skip Groq (hallucinates data without real tool results), Gemini first
 const ANALYZE_CHAIN: ProviderName[] = [
-  "mistral",
-  "cloudflare",
+  "gemini",
   "deepseek",
+  "cerebras",
+  "mistral",
   "openrouter_free",
 ];
+
+// Plan mode: DeepSeek for strategic reasoning, then Gemini
+const PLAN_CHAIN: ProviderName[] = [
+  "deepseek",
+  "gemini",
+  "cerebras",
+  "mistral",
+  "openrouter_free",
+];
+
+// Chat mode: Cerebras for speed, then Groq, then others
+const CHAT_CHAIN: ProviderName[] = [
+  "cerebras",
+  "groq",
+  "mistral",
+  "gemini",
+  "openrouter_free",
+];
+
+// Default chain (used when mode is unknown)
+const DEFAULT_CHAIN: ProviderName[] = EXECUTE_CHAIN;
 
 // Fixed models for each provider
 const PROVIDER_MODELS: Record<ProviderName, string> = {
   groq:            "llama-3.3-70b-versatile",
-  mistral:         "mistral-small-latest",
-  cloudflare:      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  gemini:          "gemini-2.0-flash",
   deepseek:        "deepseek/deepseek-v4-flash:free",
+  cerebras:        "llama-3.3-70b",
+  mistral:         "mistral-small-latest",
   openrouter_free: "openrouter/free",
 };
 
 // Daily token limits per provider
 export const PROVIDER_LIMITS: Record<ProviderName, number> = {
   groq:            500_000,
-  mistral:         1_000_000,
-  cloudflare:      1_000_000,
+  gemini:          1_000_000,
   deepseek:        1_000_000,
+  cerebras:        500_000,
+  mistral:         1_000_000,
   openrouter_free: 1_000_000,
 };
 
-// ── OpenRouter startup check ───────────────────────────────────────────────────
-console.log("[openrouter] key set:", !!process.env.OPENROUTER_API_KEY);
+console.log("[providers] groq:", !!process.env.GROQ_API_KEY);
+console.log("[providers] gemini:", !!process.env.GEMINI_API_KEY);
+console.log("[providers] cerebras:", !!process.env.CEREBRAS_API_KEY);
+console.log("[providers] mistral:", !!process.env.MISTRAL_API_KEY);
+console.log("[providers] openrouter:", !!process.env.OPENROUTER_API_KEY);
 
-// Track daily usage per provider (resets at midnight)
+// ── Daily usage tracking ───────────────────────────────────────────────────────
+
 const dailyUsage: Record<ProviderName, { tokens: number; date: string }> = {} as any;
 
 function getTodayDate(): string {
@@ -91,7 +124,7 @@ export function getProviderStatus(): Record<
   { used: number; limit: number; available: boolean }
 > {
   const status: any = {};
-  for (const provider of PROVIDER_CHAIN) {
+  for (const provider of DEFAULT_CHAIN) {
     status[provider] = {
       used:      getUsage(provider),
       limit:     PROVIDER_LIMITS[provider],
@@ -101,8 +134,18 @@ export function getProviderStatus(): Record<
   return status;
 }
 
-// Main function — tries providers in order, auto-fallback on error
-// mode="analyze" uses ANALYZE_CHAIN (skips Groq to prevent hallucinations)
+function getChainForMode(mode?: string): ProviderName[] {
+  switch (mode) {
+    case "analyze": return ANALYZE_CHAIN;
+    case "plan":    return PLAN_CHAIN;
+    case "chat":    return CHAT_CHAIN;
+    case "execute": return EXECUTE_CHAIN;
+    default:        return DEFAULT_CHAIN;
+  }
+}
+
+// ── Main fallback function ─────────────────────────────────────────────────────
+
 export async function callWithFallback(
   messages: AIMessage[],
   tools: any[],
@@ -110,7 +153,7 @@ export async function callWithFallback(
   mode?: string,
 ): Promise<AIResponse> {
   const errors: string[] = [];
-  const chain = mode === "analyze" ? ANALYZE_CHAIN : PROVIDER_CHAIN;
+  const chain = getChainForMode(mode);
 
   for (const provider of chain) {
     if (!isProviderAvailable(provider)) {
@@ -132,7 +175,7 @@ export async function callWithFallback(
   throw new Error(`All providers failed:\n${errors.join("\n")}`);
 }
 
-// ── Provider call implementations ─────────────────────────────────────────────
+// ── Provider implementations ───────────────────────────────────────────────────
 
 export async function callProvider(
   provider: ProviderName,
@@ -153,7 +196,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 4000,
+        max_tokens: 4096,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),
@@ -162,16 +205,107 @@ export async function callProvider(
 
     if (!response.ok) throw new Error(`Groq ${response.status}: ${await response.text()}`);
     const data = await response.json() as any;
-    const content    = data.choices?.[0]?.message?.content ?? "";
-    const toolCalls  = data.choices?.[0]?.message?.tool_calls;
-    const tokens     = data.usage?.total_tokens ?? 0;
-
     return {
-      content,
+      content:      data.choices?.[0]?.message?.content ?? "",
       provider,
       model,
-      tokens,
-      toolCalls:   toolCalls?.length > 0 ? toolCalls : undefined,
+      tokens:       data.usage?.total_tokens ?? 0,
+      toolCalls:    data.choices?.[0]?.message?.tool_calls?.length > 0 ? data.choices[0].message.tool_calls : undefined,
+      finishReason: data.choices?.[0]?.finish_reason,
+    };
+  }
+
+  // ── Gemini (OpenAI-compatible endpoint) ────────────────────────────────────
+  if (provider === "gemini") {
+    if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not set");
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`,
+      {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${process.env.GEMINI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          messages:   [{ role: "system", content: systemPrompt }, ...messages],
+          tools:      tools.length > 0 ? tools : undefined,
+        }),
+        signal: AbortSignal.timeout(40_000),
+      },
+    );
+
+    if (!response.ok) throw new Error(`Gemini ${response.status}: ${await response.text()}`);
+    const data = await response.json() as any;
+    return {
+      content:      data.choices?.[0]?.message?.content ?? "",
+      provider,
+      model,
+      tokens:       data.usage?.total_tokens ?? 0,
+      toolCalls:    data.choices?.[0]?.message?.tool_calls?.length > 0 ? data.choices[0].message.tool_calls : undefined,
+      finishReason: data.choices?.[0]?.finish_reason,
+    };
+  }
+
+  // ── DeepSeek via OpenRouter ────────────────────────────────────────────────
+  if (provider === "deepseek") {
+    if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY not set");
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "HTTP-Referer":  "https://joexads.repl.co",
+        "X-Title":       "Joex Ads Dashboard",
+      },
+      body: JSON.stringify({
+        model:      "deepseek/deepseek-v4-flash:free",
+        max_tokens: 4096,
+        messages:   [{ role: "system", content: systemPrompt }, ...messages],
+        tools:      tools.length > 0 ? tools : undefined,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+    if (!response.ok) throw new Error(`DeepSeek ${response.status}: ${await response.text()}`);
+    const data = await response.json() as any;
+    return {
+      content:      data.choices?.[0]?.message?.content ?? "",
+      provider,
+      model,
+      tokens:       data.usage?.total_tokens ?? 0,
+      toolCalls:    data.choices?.[0]?.message?.tool_calls?.length > 0 ? data.choices[0].message.tool_calls : undefined,
+      finishReason: data.choices?.[0]?.finish_reason,
+    };
+  }
+
+  // ── Cerebras ───────────────────────────────────────────────────────────────
+  if (provider === "cerebras") {
+    if (!process.env.CEREBRAS_API_KEY) throw new Error("CEREBRAS_API_KEY not set");
+    const response = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        messages:   [{ role: "system", content: systemPrompt }, ...messages],
+        tools:      tools.length > 0 ? tools : undefined,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!response.ok) throw new Error(`Cerebras ${response.status}: ${await response.text()}`);
+    const data = await response.json() as any;
+    return {
+      content:      data.choices?.[0]?.message?.content ?? "",
+      provider,
+      model,
+      tokens:       data.usage?.total_tokens ?? 0,
+      toolCalls:    data.choices?.[0]?.message?.tool_calls?.length > 0 ? data.choices[0].message.tool_calls : undefined,
       finishReason: data.choices?.[0]?.finish_reason,
     };
   }
@@ -187,7 +321,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 4000,
+        max_tokens: 4096,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),
@@ -196,94 +330,17 @@ export async function callProvider(
 
     if (!response.ok) throw new Error(`Mistral ${response.status}: ${await response.text()}`);
     const data = await response.json() as any;
-    const content   = data.choices?.[0]?.message?.content ?? "";
-    const toolCalls = data.choices?.[0]?.message?.tool_calls;
-    const tokens    = data.usage?.total_tokens ?? 0;
-
     return {
-      content,
+      content:      data.choices?.[0]?.message?.content ?? "",
       provider,
       model,
-      tokens,
-      toolCalls:   toolCalls?.length > 0 ? toolCalls : undefined,
+      tokens:       data.usage?.total_tokens ?? 0,
+      toolCalls:    data.choices?.[0]?.message?.tool_calls?.length > 0 ? data.choices[0].message.tool_calls : undefined,
       finishReason: data.choices?.[0]?.finish_reason,
     };
   }
 
-  // ── Cloudflare Workers AI ──────────────────────────────────────────────────
-  if (provider === "cloudflare") {
-    if (!process.env.CLOUDFLARE_API_KEY) throw new Error("CLOUDFLARE_API_KEY not set");
-    if (!process.env.CLOUDFLARE_ACCOUNT_ID) throw new Error("CLOUDFLARE_ACCOUNT_ID not set");
-
-    // Cloudflare has limited tool support — collapse tool messages to text
-    const cfMessages = messages
-      .filter((m) => m.role !== "tool")
-      .map((m) => ({
-        role:    m.role === "assistant" ? "assistant" : "user",
-        content: m.content ?? "",
-      }));
-
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`,
-      {
-        method:  "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${process.env.CLOUDFLARE_API_KEY}`,
-        },
-        body: JSON.stringify({
-          messages:   [{ role: "system", content: systemPrompt }, ...cfMessages],
-          max_tokens: 4000,
-        }),
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
-
-    if (!response.ok) throw new Error(`Cloudflare ${response.status}: ${await response.text()}`);
-    const data = await response.json() as any;
-    const content = data.result?.response ?? "";
-    const tokens  = data.result?.usage?.total_tokens ?? 500;
-
-    return { content, provider, model, tokens };
-  }
-
-  // ── DeepSeek via OpenRouter (fixed model) ─────────────────────────────────
-  if (provider === "deepseek") {
-    if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY not set");
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method:  "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "HTTP-Referer":  "https://joexads.repl.co",
-        "X-Title":       "Joex Ads Dashboard",
-      },
-      body: JSON.stringify({
-        model:      "deepseek/deepseek-v4-flash:free",
-        max_tokens: 4000,
-        messages:   [{ role: "system", content: systemPrompt }, ...messages],
-        tools:      tools.length > 0 ? tools : undefined,
-      }),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    if (!response.ok) throw new Error(`DeepSeek ${response.status}: ${await response.text()}`);
-    const data = await response.json() as any;
-    const content   = data.choices?.[0]?.message?.content ?? "";
-    const toolCalls = data.choices?.[0]?.message?.tool_calls;
-    const tokens    = data.usage?.total_tokens ?? 0;
-
-    return {
-      content,
-      provider,
-      model,
-      tokens,
-      toolCalls:   toolCalls?.length > 0 ? toolCalls : undefined,
-      finishReason: data.choices?.[0]?.finish_reason,
-    };
-  }
-
-  // ── OpenRouter Free — last resort ─────────────────────────────────────────
+  // ── OpenRouter Free (last resort) ─────────────────────────────────────────
   if (provider === "openrouter_free") {
     if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY not set");
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -296,7 +353,7 @@ export async function callProvider(
       },
       body: JSON.stringify({
         model:      "openrouter/free",
-        max_tokens: 4000,
+        max_tokens: 4096,
         messages:   [{ role: "system", content: systemPrompt }, ...messages],
         tools:      tools.length > 0 ? tools : undefined,
       }),
@@ -305,16 +362,12 @@ export async function callProvider(
 
     if (!response.ok) throw new Error(`OpenRouter ${response.status}: ${await response.text()}`);
     const data = await response.json() as any;
-    const content   = data.choices?.[0]?.message?.content ?? "";
-    const toolCalls = data.choices?.[0]?.message?.tool_calls;
-    const tokens    = data.usage?.total_tokens ?? 0;
-
     return {
-      content,
+      content:      data.choices?.[0]?.message?.content ?? "",
       provider,
       model,
-      tokens,
-      toolCalls:   toolCalls?.length > 0 ? toolCalls : undefined,
+      tokens:       data.usage?.total_tokens ?? 0,
+      toolCalls:    data.choices?.[0]?.message?.tool_calls?.length > 0 ? data.choices[0].message.tool_calls : undefined,
       finishReason: data.choices?.[0]?.finish_reason,
     };
   }
